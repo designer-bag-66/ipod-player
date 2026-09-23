@@ -174,7 +174,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       // 偶发超时/网络抖动不打断轮询，连续失败 3 次才提示错误
       pollFailCount += 1;
       console.warn(`[auth] poll failed x${pollFailCount}`, err);
-      set({ loginDebug: `轮询失败 x${pollFailCount}: ${err?.message ?? err}` });
+      set({ loginDebug: `轮询失败 x${pollFailCount}: ${String((err as any)?.message ?? err)}` });
       if (pollFailCount >= 3) {
         set({ qrStatus: 'error', errorMessage: String(err) });
       }
