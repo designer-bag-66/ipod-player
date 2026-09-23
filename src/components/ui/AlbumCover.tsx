@@ -1,7 +1,8 @@
 // ============================================================
-// AlbumCover - 封面：优先用元数据封面，否则用首字符占位
+// AlbumCover - 封面：优先用元数据封面，加载失败或缺失时用渐变占位
 // ============================================================
 
+import { useEffect, useState } from 'react';
 import { coverPlaceholderText } from '@/services/metadata';
 
 interface Props {
@@ -12,13 +13,20 @@ interface Props {
 }
 
 export function AlbumCover({ src, title, size = 140, rounded = 12 }: Props) {
-  if (src) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (src && !failed) {
     return (
       <img
         src={src}
         alt={title}
         width={size}
         height={size}
+        onError={() => setFailed(true)}
         style={{ width: size, height: size, borderRadius: rounded, objectFit: 'cover' }}
       />
     );
