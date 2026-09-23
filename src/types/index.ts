@@ -69,4 +69,8 @@ export type Screen =
   | { name: 'now-playing' }
   | { name: 'search' }
   | { name: 'settings' }
-  | { name: 'settings.import' };
+  | { name: 'settings.import' }
+  // ---- 网易云 ----
+  | { name: 'netease.login' }
+  | { name: 'netease.playlists' }
+  | { name: 'netease.playlist'; playlistId: number };

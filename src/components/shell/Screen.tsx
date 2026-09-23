@@ -6,6 +6,7 @@
 
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
+import { NowPlayingBar } from './NowPlayingBar';
 
 interface Props {
   title: string;
@@ -57,7 +58,10 @@ export function Screen({ title, rightSlot, children }: Props) {
               <Battery />
             </span>
           </div>
-          <div className="flex-1 relative overflow-hidden">{children}</div>
+          <div className="flex-1 relative overflow-hidden">
+            {children}
+            <NowPlayingBar />
+          </div>
           {rightSlot && <div className="px-3 pb-2">{rightSlot}</div>}
         </div>
       </div>

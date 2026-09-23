@@ -29,7 +29,7 @@ const STEP_DEG = 20; // 文档 4.3：18~22° 推荐 20°
 const CENTER_RATIO = 0.42;
 const OUTER_PAD_RATIO = 0.94;
 const TAP_ANGLE_HALF = Math.PI / 6; // 每个按键占 60° 扇形
-const SWIPE_ANGLE_THRESHOLD = 0.12; // 约 7° 视为滑动
+const SWIPE_ANGLE_THRESHOLD = 0.35; // 约 20° 视为滑动，提高切歌按键命中率
 
 async function haptic() {
   if (!Capacitor.isNativePlatform()) {
@@ -159,8 +159,11 @@ export function ClickWheel({
           onSelect();
           haptic();
         } else if (startTargetRef.current === 'ring') {
-          const { cx, cy } = getCenter();
-          const angle = angleFromCenter(e.clientX, e.clientY, cx, cy);
+          // 用按下时的角度判断按键，避免抬起时手指滑出扇形区导致失效
+          const angle = startAngleRef.current ?? (() => {
+            const { cx, cy } = getCenter();
+            return angleFromCenter(e.clientX, e.clientY, cx, cy);
+          })();
           const btn = buttonAtAngle(angle);
           if (btn) {
             setPressed(btn);
@@ -183,6 +186,7 @@ export function ClickWheel({
         }
       }
 
+      e.preventDefault();
       touchingRef.current = false;
       prevAngleRef.current = null;
       startAngleRef.current = null;

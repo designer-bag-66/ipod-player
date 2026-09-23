@@ -13,13 +13,21 @@ import { Screen as ScreenShell } from '@/components/shell/Screen';
 import { ClickWheel } from '@/components/shell/ClickWheel';
 import { NavTransition, type NavAnimState } from '@/components/shell/NavTransition';
 import { HomeView } from '@/components/views/HomeView';
-import { MusicView } from '@/components/views/MusicView';
+import { MusicView, selectMusicItem } from '@/components/views/MusicView';
 import { SongListView, playSongAt } from '@/components/views/SongListView';
 import { ArtistsView } from '@/components/views/ArtistsView';
 import { AlbumsView } from '@/components/views/AlbumsView';
 import { NowPlayingView } from '@/components/views/NowPlayingView';
 import { SearchView, playSearchResult } from '@/components/views/SearchView';
 import { SettingsView, settingsAction } from '@/components/views/SettingsView';
+import {
+  NeteaseLoginView,
+  NeteasePlaylistsView,
+  NeteasePlaylistView,
+  selectNeteasePlaylistItem,
+  playNeteaseSongAt,
+} from '@/components/views/NeteaseView';
+import { useAuth } from '@/stores/auth';
 
 const NAV_ANIM_MS = 280;
 
@@ -30,6 +38,7 @@ export function App() {
   const currentTrack = usePlayer((s) => s.currentTrack);
   const status = usePlayer((s) => s.status);
   const tracks = useLibrary((s) => s.tracks);
+  const neUser = useAuth((s) => s.user);
 
   const stack = useNavigation((s) => s.stack);
   const selectedIndex = useNavigation((s) => s.selectedIndex);
@@ -50,6 +59,7 @@ export function App() {
   useEffect(() => {
     init();
     playerInit();
+    useAuth.getState().bootstrap();
   }, [init, playerInit]);
 
   // 卸载时清理 timer
@@ -108,6 +118,12 @@ export function App() {
         return '设置';
       case 'settings.import':
         return '导入歌曲';
+      case 'netease.login':
+        return '网易云登录';
+      case 'netease.playlists':
+        return '我的歌单';
+      case 'netease.playlist':
+        return '歌单';
     }
   })();
 
@@ -123,11 +139,14 @@ export function App() {
     const item = items[selectedIndex];
     switch (current.name) {
       case 'home': {
+        const favId = neUser?.account.id;
         const iconRoutes: Record<number, ScreenType> = {
-          0: { name: 'music.songs' },
-          1: { name: 'music.artists' },
+          0: { name: 'music' },
+          1: neUser ? { name: 'netease.playlists' } : { name: 'netease.login' },
           2: { name: 'music.albums' },
-          3: { name: 'music.favorites' },
+          3: neUser
+            ? { name: 'netease.playlist', playlistId: favId! }
+            : { name: 'netease.login' },
           4: { name: 'search' },
           5: { name: 'settings' },
         };
@@ -148,19 +167,7 @@ export function App() {
         return;
       }
       case 'music':
-        if (item.kind === 'submenu' && item.label === '歌手') {
-          push({ name: 'music.artists' });
-        } else if (item.kind === 'submenu' && item.label === '专辑') {
-          push({ name: 'music.albums' });
-        } else if (item.kind === 'submenu' && item.label === '歌曲') {
-          push({ name: 'music.songs' });
-        } else if (item.kind === 'submenu' && item.label === '我的歌单') {
-          push({ name: 'music.playlists' });
-        } else if (item.kind === 'submenu' && item.label === '我喜欢的音乐') {
-          push({ name: 'music.favorites' });
-        } else if (item.kind === 'action' && item.label === '导入歌曲…') {
-          push({ name: 'settings.import' });
-        }
+        selectMusicItem(selectedIndex);
         return;
       case 'now-playing':
         return;
@@ -173,6 +180,25 @@ export function App() {
         return;
       case 'settings':
         settingsAction(selectedIndex);
+        return;
+      case 'netease.login':
+        // 根据 label 分发到登录页内置动作
+        {
+          const item = items[selectedIndex];
+          if (item.kind === 'action') {
+            if (item.label === '重试获取用户信息') {
+              useAuth.getState().refreshAccount();
+            } else {
+              useAuth.getState().startLogin();
+            }
+          }
+        }
+        return;
+      case 'netease.playlists':
+        selectNeteasePlaylistItem(selectedIndex);
+        return;
+      case 'netease.playlist':
+        if (item.kind === 'track') playNeteaseSongAt(selectedIndex);
         return;
     }
   }
@@ -219,6 +245,12 @@ export function App() {
         return <SettingsView />;
       case 'settings.import':
         return <SettingsView />;
+      case 'netease.login':
+        return <NeteaseLoginView />;
+      case 'netease.playlists':
+        return <NeteasePlaylistsView />;
+      case 'netease.playlist':
+        return <NeteasePlaylistView playlistId={current.playlistId} />;
       default:
         return <HomeView />;
     }

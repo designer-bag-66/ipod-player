@@ -1,6 +1,7 @@
 // ============================================================
 // 播放器 Store（文档 3.2 PlayerState + 4.2 系统媒体）
 // 用单例 HTMLAudioElement + MediaSession API
+// 兼容本地曲库（blob URL）和网易云（/netease-stream 代理）
 // ============================================================
 
 import { create } from 'zustand';
@@ -13,6 +14,11 @@ import type {
 } from '@/types';
 import { useLibrary } from './library';
 import { setSetting, getSetting } from '@/services/storage';
+import {
+  fetchSongUrl,
+  lookupNeteaseTrack,
+  type NetEaseTrack,
+} from '@/services/netease';
 
 interface PlayerStore extends PlayerState {
   /** 当前播放的 Track（用于 NowPlaying） */
@@ -24,6 +30,7 @@ interface PlayerStore extends PlayerState {
 
   init(): Promise<void>;
   playTrack(track: Track, queue?: TrackID[]): Promise<void>;
+  playNeteaseTrack(track: NetEaseTrack, queue: NetEaseTrack[]): Promise<void>;
   toggle(): Promise<void>;
   play(): Promise<void>;
   pause(): Promise<void>;
@@ -154,13 +161,28 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
 
   async playTrack(track, queue) {
     const audio = get().audio;
-    const lib = useLibrary.getState();
-    const url = await lib.getBlobUrl(track.id);
-    if (!url) {
-      console.warn('[player] blob not found', track.id);
-      return;
+    let url: string | null = null;
+
+    if (track.id.startsWith('netease:')) {
+      const neId = Number(track.id.slice(8));
+      const item = await fetchSongUrl(neId, 320000);
+      if (!item?.url) {
+        console.warn('[player] netease track no url (VIP?)', neId);
+        set({ status: 'error' });
+        return;
+      }
+      // 通过 Vite 中间件流回前端（同源，无 CORS 问题）
+      url = `/netease-stream?u=${encodeURIComponent(item.url)}`;
+    } else {
+      const lib = useLibrary.getState();
+      url = (await lib.getBlobUrl(track.id)) ?? null;
+      if (!url) {
+        console.warn('[player] blob not found', track.id);
+        return;
+      }
     }
 
+    const lib = useLibrary.getState();
     const fullQueue =
       queue ??
       (get().queue.length > 0
@@ -185,6 +207,23 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
       console.error('[player] play failed', err);
       set({ status: 'error' });
     }
+  },
+
+  async playNeteaseTrack(track, queue) {
+    const localId = `netease:${track.id}`;
+    const fakeTrack: Track = {
+      id: localId,
+      title: track.name,
+      artist: track.ar.map((a) => a.name).join(' / '),
+      album: track.al.name,
+      duration: track.dt / 1000,
+      artworkUrl: `${track.al.picUrl}?param=300y300`,
+      fileName: 'netease.mp3',
+      importedAt: Date.now(),
+      liked: false,
+    };
+    const queueIds = queue.map((t) => `netease:${t.id}`);
+    await get().playTrack(fakeTrack, queueIds);
   },
 
   async toggle() {
@@ -226,9 +265,18 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
 
     const lib = useLibrary.getState();
     const nextTrack = lib.tracks.find((t) => t.id === s.queue[nextIdx]);
-    if (!nextTrack) return;
-    await get().playTrack(nextTrack, s.queue);
-    set({ currentIndex: nextIdx });
+    if (nextTrack) {
+      await get().playTrack(nextTrack, s.queue);
+      set({ currentIndex: nextIdx });
+      return;
+    }
+    // 网易云曲目（queue id 前缀 netease:）
+    const neTrack = lookupNeteaseTrack(s.queue[nextIdx]);
+    if (neTrack) {
+      const q = s.queue.map((id) => lookupNeteaseTrack(id)).filter(Boolean) as NetEaseTrack[];
+      await get().playNeteaseTrack(neTrack, q);
+      set({ currentIndex: nextIdx });
+    }
   },
 
   async previous() {
@@ -246,9 +294,17 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
 
     const lib = useLibrary.getState();
     const prevTrack = lib.tracks.find((t) => t.id === s.queue[prevIdx]);
-    if (!prevTrack) return;
-    await get().playTrack(prevTrack, s.queue);
-    set({ currentIndex: prevIdx });
+    if (prevTrack) {
+      await get().playTrack(prevTrack, s.queue);
+      set({ currentIndex: prevIdx });
+      return;
+    }
+    const neTrack = lookupNeteaseTrack(s.queue[prevIdx]);
+    if (neTrack) {
+      const q = s.queue.map((id) => lookupNeteaseTrack(id)).filter(Boolean) as NetEaseTrack[];
+      await get().playNeteaseTrack(neTrack, q);
+      set({ currentIndex: prevIdx });
+    }
   },
 
   async seek(elapsed) {
