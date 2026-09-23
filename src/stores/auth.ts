@@ -14,6 +14,9 @@ import {
   clearCookie,
   checkApiAvailable,
   getLastApiError,
+  loadCachedUser,
+  saveCachedUser,
+  clearCachedUser,
   type NetEaseUser,
 } from '@/services/netease';
 
@@ -67,6 +70,9 @@ export const useAuth = create<AuthState>((set, get) => ({
     const online = await checkApiAvailable();
     if (!online) {
       const reason = getLastApiError();
+      // 离线时用缓存维持登录态，避免刚登录又被判定未登录
+      const cached = loadCachedUser();
+      if (cached && hasCookie()) set({ user: cached });
       set({ apiOnline: false, errorMessage: `网易云 API 不可达（${reason || '未知原因'}）` });
       // 5 秒后自动重试，直到服务可达
       if (retryTimer) window.clearTimeout(retryTimer);
@@ -83,16 +89,28 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ apiOnline: true, errorMessage: '' });
 
     if (hasCookie()) {
-      try {
-        const user = await fetchAccount();
-        if (user) {
-          set({ user });
-          return;
+      // 冷启动/网络抖动可能让首次请求拿不到资料，重试最多 3 次
+      let user: NetEaseUser | null = null;
+      for (let i = 0; i < 3 && !user; i++) {
+        try {
+          user = await fetchAccount();
+        } catch (err) {
+          console.warn('[auth] bootstrap fetchAccount failed', err);
         }
-      } catch (err) {
-        console.warn('[auth] bootstrap fetchAccount failed', err);
+        if (!user) {
+          await new Promise((r) => window.setTimeout(r, 1500));
+        }
       }
-      clearCookie();
+
+      if (user) {
+        saveCachedUser(user);
+        set({ user });
+        return;
+      }
+
+      // 拉取失败不再清除 cookie（否则用户会被踢出），用缓存维持登录态
+      const cached = loadCachedUser();
+      if (cached) set({ user: cached });
     }
   },
 
@@ -151,6 +169,7 @@ export const useAuth = create<AuthState>((set, get) => ({
             console.error('[auth] fetchAccount error', err);
           }
           if (user) {
+            saveCachedUser(user);
             set({ user, qrStatus: 'success', accountError: '', loginDebug: '登录成功（cookie）' });
             console.log('[auth] login via cookie', user);
           } else {
@@ -210,6 +229,7 @@ export const useAuth = create<AuthState>((set, get) => ({
 
   logout() {
     clearCookie();
+    clearCachedUser();
     if (pollTimer) {
       window.clearInterval(pollTimer);
       pollTimer = null;
