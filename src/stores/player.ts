@@ -17,6 +17,7 @@ import { setSetting, getSetting } from '@/services/storage';
 import {
   fetchSongUrl,
   lookupNeteaseTrack,
+  NETEASE_BASE_URL,
   type NetEaseTrack,
 } from '@/services/netease';
 
@@ -171,8 +172,11 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
         set({ status: 'error' });
         return;
       }
-      // 通过 Vite 中间件流回前端（同源，无 CORS 问题）
-      url = `/netease-stream?u=${encodeURIComponent(item.url)}`;
+      // 远程 API：音频直连网易云 CDN（audio.src 不受 CORS 限制，转 https 过 iOS ATS）
+      // 本地开发（BASE=/netease）：走 Vite 流代理
+      url = NETEASE_BASE_URL.startsWith('http')
+        ? item.url.replace(/^http:/, 'https:')
+        : `/netease-stream?u=${encodeURIComponent(item.url)}`;
     } else {
       const lib = useLibrary.getState();
       url = (await lib.getBlobUrl(track.id)) ?? null;
