@@ -11,6 +11,7 @@ import {
   fetchUserPlaylists,
   fetchPlaylistDetail,
   hasCookie,
+  NETEASE_BASE_URL,
   type NetEasePlaylistSummary,
   type NetEaseTrack,
   type NetEaseUser,
@@ -51,7 +52,15 @@ export function NeteaseLoginView() {
 
   // 列表项注册
   useEffect(() => {
-    let label = apiOnline ? '使用网易云 APP 扫码' : '请先启动本地服务';
+    if (!apiOnline) {
+      setItems([
+        { kind: 'title', label: `服务离线 · ${errorMessage.slice(0, 40) || '请求超时'}` },
+        { kind: 'action', label: '重试连接', meta: '' },
+      ]);
+      return;
+    }
+
+    let label = '使用网易云 APP 扫码';
     if (qrStatus === 'expired') label = '二维码已过期';
     if (qrStatus === 'success' && !user) label = '登录成功，按 SELECT 重试';
 
@@ -62,7 +71,7 @@ export function NeteaseLoginView() {
         ? [{ kind: 'action' as const, label: '重试获取用户信息', meta: '' }]
         : []),
     ]);
-  }, [apiOnline, qrImg, qrStatus, user, accountError, setItems]);
+  }, [apiOnline, errorMessage, qrImg, qrStatus, user, accountError, setItems]);
 
   // 进入登录页：API 在线则自动生成 QR
   useEffect(() => {
@@ -95,18 +104,18 @@ export function NeteaseLoginView() {
   return (
     <div className="h-full w-full flex flex-col items-center justify-start pt-2 pb-2 px-3">
       {!apiOnline ? (
-        <div className="text-center mt-6">
+        <div className="text-center mt-6 px-2">
           <div className="text-[13px] font-bold mb-2" style={{ color: 'var(--screen-text-primary)' }}>
-            无法连接本地服务
+            无法连接网易云 API
           </div>
-          <div className="text-[11px] leading-relaxed" style={{ color: 'var(--screen-text-secondary)' }}>
-            请先启动网易云 API（端口 3000）：
-            <div className="my-1 px-2 py-1 bg-black/5 rounded font-mono text-[10px] text-left">
-              cd D:\tools\NeteaseCloudMusicApi
-              <br />
-              node app.js
-            </div>
-            看到 <span className="font-mono">server running @ http://localhost:3000</span> 后回到本应用
+          <div className="text-[11px] leading-relaxed mb-2" style={{ color: 'var(--screen-text-secondary)' }}>
+            {errorMessage || '请求超时或无响应，请按 SELECT 重试连接'}
+          </div>
+          <div className="my-1 px-2 py-1 bg-black/5 rounded font-mono text-[9px] break-all" style={{ color: 'var(--screen-text-secondary)' }}>
+            {NETEASE_BASE_URL}
+          </div>
+          <div className="text-[10px] mt-1" style={{ color: 'var(--screen-text-secondary)' }}>
+            可在 Safari 打开上方地址测试是否可达
           </div>
         </div>
       ) : qrStatus === 'success' && !user ? (
