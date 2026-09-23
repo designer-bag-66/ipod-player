@@ -89,6 +89,26 @@ export function App() {
     };
   }, []);
 
+  // 切后台再回来时，iOS WKWebView 视口尺寸可能变化导致布局变形；
+  // 恢复时滚动归零并触发一次 resize，让布局重新计算
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      window.setTimeout(() => {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+        window.dispatchEvent(new Event('resize'));
+      }, 120);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', onVisible);
+    };
+  }, []);
+
   function queueTimer(fn: () => void, ms: number) {
     const id = window.setTimeout(fn, ms);
     navTimersRef.current.push(id);
