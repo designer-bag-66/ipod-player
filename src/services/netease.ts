@@ -235,7 +235,7 @@ export function neteaseToLocalTrack(t: NetEaseTrack): import('@/types').Track {
     artist: t.ar.map((a) => a.name).join(' / '),
     album: t.al.name,
     duration: t.dt / 1000,
-    artworkUrl: `${t.al.picUrl}?param=300y300`,
+    artworkUrl: t.al?.picUrl ? `${t.al.picUrl.replace(/^http:/, 'https:')}?param=300y300` : undefined,
     fileName: 'netease.mp3',
     importedAt: Date.now(),
     liked: false,
