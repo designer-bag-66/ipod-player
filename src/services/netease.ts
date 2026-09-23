@@ -216,13 +216,33 @@ export function neteaseToLocalTrack(t: NetEaseTrack): import('@/types').Track {
 
 // ---------------- 服务可达性 ----------------
 
-/** 检查本地 NeteaseCloudMusicApi 服务是否可达 */
+/** 最近一次可达性检查失败的原因（供 UI 显示 / 排查） */
+let _lastApiError = '';
+
+export function getLastApiError(): string {
+  return _lastApiError;
+}
+
+/** 检查网易云 API 服务是否可达，失败时记录原因 */
 export async function checkApiAvailable(): Promise<boolean> {
+  _lastApiError = '';
   try {
     const res = await fetch(`${BASE}/banner?type=0&_t=${Date.now()}`);
-    const json: any = await res.json();
-    return json?.code === 200;
-  } catch {
+    let json: any;
+    try {
+      json = await res.json();
+    } catch {
+      _lastApiError = `HTTP ${res.status}，响应不是 JSON`;
+      return false;
+    }
+    if (json?.code !== 200) {
+      _lastApiError = `HTTP ${res.status}，code=${json?.code}`;
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    const msg = String(err?.message ?? err);
+    _lastApiError = msg.slice(0, 80);
     return false;
   }
 }
