@@ -40,12 +40,27 @@ export interface NetEaseUser {
 }
 
 // 远程 API（Vercel 部署的 NeteaseCloudMusicApi，CORS 默认全开）
+// 自定义域名优先（国内直连），vercel.app 作为兜底；任一地址可用即自动切换
 // 本地开发如需走 Vite 代理，在 .env.local 设置 VITE_NETEASE_API=/netease
-const BASE: string =
-  ((import.meta as any).env?.VITE_NETEASE_API as string | undefined) ||
-  'https://api-enhanced-five-puce.vercel.app';
+const DEFAULT_BASES = [
+  'https://api.6qxxvp.top',
+  'https://api-enhanced-five-puce.vercel.app',
+];
 
-export const NETEASE_BASE_URL = BASE;
+const ENV_BASE = ((import.meta as any).env?.VITE_NETEASE_API as string | undefined) || '';
+
+export const NETEASE_BASES: string[] = ENV_BASE
+  ? [ENV_BASE, ...DEFAULT_BASES.filter((b) => b !== ENV_BASE)]
+  : DEFAULT_BASES;
+
+/** 当前生效的地址；checkApiAvailable 会把第一个可用的地址设为生效地址 */
+let _activeBase = NETEASE_BASES[0];
+
+export function getActiveBase(): string {
+  return _activeBase;
+}
+
+export const NETEASE_BASE_URL = NETEASE_BASES[0];
 
 const COOKIE_KEY = 'netease_cookie';
 let _cookie = localStorage.getItem(COOKIE_KEY) ?? '';
@@ -88,14 +103,14 @@ async function call<T = any>(path: string, params: Record<string, string | numbe
   qs.set('_t', String(Date.now()));
   const headers: Record<string, string> = {};
   if (_cookie) {
-    if (BASE.startsWith('http')) {
+    if (_activeBase.startsWith('http')) {
       // 跨域 fetch 不允许自定义 Cookie 请求头，改用 query 参数传递
       qs.set('cookie', _cookie);
     } else {
       headers['Cookie'] = _cookie;
     }
   }
-  const url = `${BASE}${path}${qs.toString() ? '?' + qs.toString() : ''}`;
+  const url = `${_activeBase}${path}${qs.toString() ? '?' + qs.toString() : ''}`;
   console.log('[netease] request', path, 'cookie-sent?', !!_cookie, _cookie ? _cookie.slice(0, 60) : '');
   const res = await fetchWithTimeout(url, { headers });
   const json: any = await res.json();
@@ -236,29 +251,42 @@ export function getLastApiError(): string {
   return _lastApiError;
 }
 
-/** 检查网易云 API 服务是否可达，失败时记录原因 */
-export async function checkApiAvailable(): Promise<boolean> {
-  _lastApiError = '';
+/** 逐个探测候选地址：第一个可用的会成为生效地址 */
+async function probeBase(base: string): Promise<{ ok: boolean; reason: string }> {
   try {
-    const res = await fetchWithTimeout(`${BASE}/banner?type=0&_t=${Date.now()}`);
+    const res = await fetchWithTimeout(`${base}/banner?type=0&_t=${Date.now()}`);
     let json: any;
     try {
       json = await res.json();
     } catch {
-      _lastApiError = `HTTP ${res.status}，响应不是 JSON`;
-      return false;
+      return { ok: false, reason: `HTTP ${res.status}，响应不是 JSON` };
     }
     if (json?.code !== 200) {
-      _lastApiError = `HTTP ${res.status}，code=${json?.code}`;
-      return false;
+      return { ok: false, reason: `HTTP ${res.status}，code=${json?.code}` };
     }
-    return true;
+    return { ok: true, reason: '' };
   } catch (err: any) {
     const msg =
       err?.name === 'AbortError'
         ? `请求超时（${FETCH_TIMEOUT_MS / 1000}s 无响应）`
         : String(err?.message ?? err);
-    _lastApiError = msg.slice(0, 80);
-    return false;
+    return { ok: false, reason: msg };
   }
+}
+
+/** 检查网易云 API 服务是否可达，失败时记录原因 */
+export async function checkApiAvailable(): Promise<boolean> {
+  const reasons: string[] = [];
+  for (const base of NETEASE_BASES) {
+    const host = base.replace(/^https?:\/\//, '');
+    const r = await probeBase(base);
+    if (r.ok) {
+      _activeBase = base;
+      _lastApiError = '';
+      return true;
+    }
+    reasons.push(`${host}: ${r.reason}`);
+  }
+  _lastApiError = reasons.join(' | ').slice(0, 120);
+  return false;
 }
