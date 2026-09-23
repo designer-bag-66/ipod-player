@@ -79,7 +79,10 @@ export function MusicView() {
     }
 
     // 网易云区域
-    pushItem({ kind: 'title', label: '网易云音乐' }, () => {});
+    pushItem(
+      { kind: 'submenu', label: '网易云音乐' },
+      () => push({ name: 'netease.login' }),
+    );
     if (neUser) {
       if (neLoading) {
         pushItem({ kind: 'title', label: '加载中…' }, () => {});
@@ -104,8 +107,12 @@ export function MusicView() {
       );
     } else {
       pushItem(
-        { kind: 'title', label: `服务离线 · ${apiError.slice(0, 30)}` },
+        { kind: 'title', label: `服务离线 · ${apiError.slice(0, 40) || '请求超时'}` },
         () => {},
+      );
+      pushItem(
+        { kind: 'action', label: '重试连接' },
+        () => useAuth.getState().bootstrap(),
       );
     }
 
