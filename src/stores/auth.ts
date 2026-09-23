@@ -13,6 +13,7 @@ import {
   loginQrCheck,
   clearCookie,
   checkApiAvailable,
+  getLastApiError,
   type NetEaseUser,
 } from '@/services/netease';
 
@@ -45,6 +46,7 @@ interface AuthState {
 }
 
 let pollTimer: number | null = null;
+let retryTimer: number | null = null;
 let qrKey = '';
 
 export const useAuth = create<AuthState>((set, get) => ({
@@ -59,8 +61,19 @@ export const useAuth = create<AuthState>((set, get) => ({
   async bootstrap() {
     const online = await checkApiAvailable();
     if (!online) {
-      set({ apiOnline: false, errorMessage: '本地网易云 API 服务不可达，请先启动 NeteaseCloudMusicApi' });
+      const reason = getLastApiError();
+      set({ apiOnline: false, errorMessage: `网易云 API 不可达（${reason || '未知原因'}）` });
+      // 5 秒后自动重试，直到服务可达
+      if (retryTimer) window.clearTimeout(retryTimer);
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        void get().bootstrap();
+      }, 5000);
       return;
+    }
+    if (retryTimer) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
     }
     set({ apiOnline: true, errorMessage: '' });
 
