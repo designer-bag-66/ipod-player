@@ -65,8 +65,8 @@ export const NETEASE_BASE_URL = NETEASE_BASES[0];
 const COOKIE_KEY = 'netease_cookie';
 let _cookie = localStorage.getItem(COOKIE_KEY) ?? '';
 
-/** fetch 超时（ms）：防止 WKWebView 中请求挂起导致永远无响应 */
-export const FETCH_TIMEOUT_MS = 10000;
+/** fetch 超时（ms）：防止 WKWebView 中请求挂起；Vercel 冷启动可能较慢，放宽到 20s */
+export const FETCH_TIMEOUT_MS = 20000;
 
 export async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   const ctrl = new AbortController();
