@@ -11,7 +11,7 @@ import {
   fetchUserPlaylists,
   fetchPlaylistDetail,
   hasCookie,
-  NETEASE_BASE_URL,
+  NETEASE_BASES,
   type NetEasePlaylistSummary,
   type NetEaseTrack,
   type NetEaseUser,
@@ -54,7 +54,7 @@ export function NeteaseLoginView() {
   useEffect(() => {
     if (!apiOnline) {
       setItems([
-        { kind: 'title', label: `服务离线 · ${errorMessage.slice(0, 40) || '请求超时'}` },
+        { kind: 'title', label: `服务离线 · ${errorMessage.slice(0, 60) || '请求超时'}` },
         { kind: 'action', label: '重试连接', meta: '' },
       ]);
       return;
@@ -111,8 +111,8 @@ export function NeteaseLoginView() {
           <div className="text-[11px] leading-relaxed mb-2" style={{ color: 'var(--screen-text-secondary)' }}>
             {errorMessage || '请求超时或无响应，请按 SELECT 重试连接'}
           </div>
-          <div className="my-1 px-2 py-1 bg-black/5 rounded font-mono text-[9px] break-all" style={{ color: 'var(--screen-text-secondary)' }}>
-            {NETEASE_BASE_URL}
+          <div className="my-1 px-2 py-1 bg-black/5 rounded font-mono text-[9px] whitespace-pre-line break-all" style={{ color: 'var(--screen-text-secondary)' }}>
+            {NETEASE_BASES.join('\n')}
           </div>
           <div className="text-[10px] mt-1" style={{ color: 'var(--screen-text-secondary)' }}>
             可在 Safari 打开上方地址测试是否可达
