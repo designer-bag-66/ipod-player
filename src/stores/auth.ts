@@ -48,6 +48,8 @@ interface AuthState {
 let pollTimer: number | null = null;
 let retryTimer: number | null = null;
 let qrKey = '';
+/** 轮询连续失败计数：偶发超时不打断登录流程 */
+let pollFailCount = 0;
 
 export const useAuth = create<AuthState>((set, get) => ({
   apiOnline: false,
@@ -92,6 +94,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   },
 
   async startLogin() {
+    pollFailCount = 0;
     set({ qrStatus: 'idle', qrImg: '', errorMessage: '', accountError: '' });
     try {
       qrKey = await loginQrKey();
@@ -111,6 +114,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     if (!qrKey) return;
     try {
       const r = await loginQrCheck(qrKey);
+      pollFailCount = 0;
       set({ lastCheck: Date.now() });
       if (r.code === 800) {
         // 等待扫码
@@ -160,8 +164,12 @@ export const useAuth = create<AuthState>((set, get) => ({
         }
       }
     } catch (err) {
-      console.error('[auth] poll failed', err);
-      set({ qrStatus: 'error', errorMessage: String(err) });
+      // 偶发超时/网络抖动不打断轮询，连续失败 3 次才提示错误
+      pollFailCount += 1;
+      console.warn(`[auth] poll failed x${pollFailCount}`, err);
+      if (pollFailCount >= 3) {
+        set({ qrStatus: 'error', errorMessage: String(err) });
+      }
     }
   },
 
@@ -188,6 +196,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       pollTimer = null;
     }
     qrKey = '';
+    pollFailCount = 0;
     set({ qrImg: '', qrStatus: 'idle', errorMessage: '', accountError: '' });
   },
 
