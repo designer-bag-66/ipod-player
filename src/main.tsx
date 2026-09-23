@@ -13,6 +13,7 @@ import { Screen as ScreenShell } from '@/components/shell/Screen';
 import { ClickWheel } from '@/components/shell/ClickWheel';
 import { QuickPanel, type QuickAdjust } from '@/components/shell/QuickPanel';
 import { getSetting, setSetting } from '@/services/storage';
+import { App as CapacitorApp } from '@capacitor/app';
 import { NavTransition, type NavAnimState } from '@/components/shell/NavTransition';
 import { HomeView } from '@/components/views/HomeView';
 import { MusicView, selectMusicItem } from '@/components/views/MusicView';
@@ -103,9 +104,25 @@ export function App() {
     };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('pageshow', onVisible);
+
+    // 回到前台时补一次登录态恢复（若已掉线则重新 bootstrap）
+    let handle: { remove: () => Promise<void> } | null = null;
+    CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive) return;
+      window.setTimeout(() => {
+        const s = useAuth.getState();
+        if (!s.user) void s.bootstrap();
+      }, 300);
+    })
+      .then((h) => {
+        handle = h;
+      })
+      .catch(() => {});
+
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('pageshow', onVisible);
+      handle?.remove().catch(() => {});
     };
   }, []);
 
