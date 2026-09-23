@@ -27,6 +27,7 @@ export function NeteaseLoginView() {
   const qrStatus = useAuth((s) => s.qrStatus);
   const errorMessage = useAuth((s) => s.errorMessage);
   const accountError = useAuth((s) => s.accountError);
+  const loginDebug = useAuth((s) => s.loginDebug);
   const startLogin = useAuth((s) => s.startLogin);
   const resetLogin = useAuth((s) => s.resetLogin);
   const refreshAccount = useAuth((s) => s.refreshAccount);
@@ -164,6 +165,11 @@ export function NeteaseLoginView() {
           </div>
         </>
       )}
+      {!user && apiOnline && loginDebug ? (
+        <div className="mt-2 px-2 text-[9px] whitespace-pre-wrap break-all text-center" style={{ color: 'var(--screen-text-muted)' }}>
+          [debug] {loginDebug}
+        </div>
+      ) : null}
     </div>
   );
 }
