@@ -16,11 +16,11 @@ interface Props {
 
 export function IPodShell({ children, wheel, transitioning }: Props) {
   return (
-    <div className={`ipod-shell p-4 max-w-[420px] mx-auto safe-top safe-bottom ${transitioning ? 'popping' : ''}`}>
-      <div className="flex flex-col items-center gap-4">
+    <div className={`ipod-shell safe-top safe-bottom ${transitioning ? 'popping' : ''}`}>
+      <div className="w-full flex flex-col items-center flex-1 min-h-0">
         {children}
-        <div className="w-[90%] pb-2">{wheel}</div>
       </div>
+      <div className="w-[90%] shrink-0">{wheel}</div>
     </div>
   );
 }
