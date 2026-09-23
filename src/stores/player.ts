@@ -1,0 +1,299 @@
+// ============================================================
+// 播放器 Store（文档 3.2 PlayerState + 4.2 系统媒体）
+// 用单例 HTMLAudioElement + MediaSession API
+// ============================================================
+
+import { create } from 'zustand';
+import type {
+  Track,
+  TrackID,
+  PlayerState,
+  RepeatMode,
+  ShuffleMode,
+} from '@/types';
+import { useLibrary } from './library';
+import { setSetting, getSetting } from '@/services/storage';
+
+interface PlayerStore extends PlayerState {
+  /** 当前播放的 Track（用于 NowPlaying） */
+  currentTrack: Track | null;
+  /** 内部音频元素 */
+  audio: HTMLAudioElement;
+  /** 进度刷新定时器 id */
+  rafId: number | null;
+
+  init(): Promise<void>;
+  playTrack(track: Track, queue?: TrackID[]): Promise<void>;
+  toggle(): Promise<void>;
+  play(): Promise<void>;
+  pause(): Promise<void>;
+  next(): Promise<void>;
+  previous(): Promise<void>;
+  seek(elapsed: number): Promise<void>;
+  cycleRepeat(): void;
+  toggleShuffle(): void;
+  setVolume(v: number): void;
+  teardown(): void;
+}
+
+function setupMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.setActionHandler('play', () => {
+    usePlayer.getState().play();
+  });
+  navigator.mediaSession.setActionHandler('pause', () => {
+    usePlayer.getState().pause();
+  });
+  navigator.mediaSession.setActionHandler('previoustrack', () => {
+    usePlayer.getState().previous();
+  });
+  navigator.mediaSession.setActionHandler('nexttrack', () => {
+    usePlayer.getState().next();
+  });
+  navigator.mediaSession.setActionHandler('seekbackward', () => {
+    const s = usePlayer.getState();
+    s.seek(Math.max(0, s.elapsed - 10));
+  });
+  navigator.mediaSession.setActionHandler('seekforward', () => {
+    const s = usePlayer.getState();
+    s.seek(Math.min(s.currentTrack?.duration ?? 0, s.elapsed + 10));
+  });
+}
+
+async function updateMediaSessionMetadata(track: Track) {
+  if (!('mediaSession' in navigator)) return;
+  const artwork = track.artworkUrl
+    ? [
+        {
+          src: track.artworkUrl,
+          sizes: '512x512',
+          type: 'image/jpeg',
+        },
+      ]
+    : [];
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      artwork,
+    });
+  } catch (err) {
+    console.warn('[mediaSession] metadata failed', err);
+  }
+}
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+export const usePlayer = create<PlayerStore>((set, get) => ({
+  queue: [],
+  currentIndex: -1,
+  status: 'idle',
+  elapsed: 0,
+  shuffle: 'off',
+  repeat: 'off',
+  volume: 1,
+  currentTrack: null,
+  audio: new Audio(),
+  rafId: null,
+
+  async init() {
+    const audio = get().audio;
+    audio.preload = 'auto';
+    audio.crossOrigin = 'anonymous';
+
+    // 恢复设置
+    const settings = await Promise.all([
+      getSetting<RepeatMode>('repeat'),
+      getSetting<ShuffleMode>('shuffle'),
+      getSetting<number>('volume'),
+    ]);
+    set({
+      repeat: settings[0] ?? 'off',
+      shuffle: settings[1] ?? 'off',
+      volume: settings[2] ?? 1,
+    });
+    audio.volume = get().volume;
+
+    setupMediaSession();
+
+    audio.addEventListener('ended', () => {
+      const s = get();
+      if (s.repeat === 'one') {
+        audio.currentTime = 0;
+        audio.play().catch(console.error);
+        return;
+      }
+      s.next();
+    });
+
+    audio.addEventListener('timeupdate', () => {
+      set({ elapsed: audio.currentTime });
+    });
+
+    audio.addEventListener('play', () => {
+      set({ status: 'playing' });
+    });
+    audio.addEventListener('pause', () => {
+      set({ status: 'paused' });
+    });
+    audio.addEventListener('waiting', () => {
+      set({ status: 'loading' });
+    });
+    audio.addEventListener('error', () => {
+      set({ status: 'error' });
+    });
+  },
+
+  async playTrack(track, queue) {
+    const audio = get().audio;
+    const lib = useLibrary.getState();
+    const url = await lib.getBlobUrl(track.id);
+    if (!url) {
+      console.warn('[player] blob not found', track.id);
+      return;
+    }
+
+    const fullQueue =
+      queue ??
+      (get().queue.length > 0
+        ? get().queue
+        : lib.tracks.map((t) => t.id));
+    const idx = fullQueue.indexOf(track.id);
+
+    audio.src = url;
+    audio.currentTime = 0;
+    set({
+      currentTrack: track,
+      queue: fullQueue,
+      currentIndex: idx >= 0 ? idx : 0,
+      elapsed: 0,
+      status: 'loading',
+    });
+    await updateMediaSessionMetadata(track);
+    try {
+      await audio.play();
+      set({ status: 'playing' });
+    } catch (err) {
+      console.error('[player] play failed', err);
+      set({ status: 'error' });
+    }
+  },
+
+  async toggle() {
+    const { status } = get();
+    if (status === 'playing') return get().pause();
+    return get().play();
+  },
+
+  async play() {
+    const { audio, currentTrack } = get();
+    if (!currentTrack) return;
+    try {
+      await audio.play();
+    } catch (err) {
+      console.error('[player] resume failed', err);
+    }
+  },
+
+  async pause() {
+    get().audio.pause();
+  },
+
+  async next() {
+    const s = get();
+    if (!s.currentTrack || s.queue.length === 0) return;
+
+    if (s.repeat === 'one') {
+      const audio = s.audio;
+      audio.currentTime = 0;
+      await audio.play();
+      return;
+    }
+
+    let nextIdx = s.currentIndex + 1;
+    if (nextIdx >= s.queue.length) {
+      if (s.repeat === 'all') nextIdx = 0;
+      else return s.pause();
+    }
+
+    const lib = useLibrary.getState();
+    const nextTrack = lib.tracks.find((t) => t.id === s.queue[nextIdx]);
+    if (!nextTrack) return;
+    await get().playTrack(nextTrack, s.queue);
+    set({ currentIndex: nextIdx });
+  },
+
+  async previous() {
+    const s = get();
+    if (!s.currentTrack || s.queue.length === 0) return;
+
+    // 距开始 >3s 时回到开头
+    if (s.elapsed > 3) {
+      s.audio.currentTime = 0;
+      return;
+    }
+
+    let prevIdx = s.currentIndex - 1;
+    if (prevIdx < 0) prevIdx = s.repeat === 'all' ? s.queue.length - 1 : 0;
+
+    const lib = useLibrary.getState();
+    const prevTrack = lib.tracks.find((t) => t.id === s.queue[prevIdx]);
+    if (!prevTrack) return;
+    await get().playTrack(prevTrack, s.queue);
+    set({ currentIndex: prevIdx });
+  },
+
+  async seek(elapsed) {
+    const { audio, currentTrack } = get();
+    if (!currentTrack) return;
+    audio.currentTime = Math.min(
+      Math.max(0, elapsed),
+      currentTrack.duration || audio.duration || 0,
+    );
+    set({ elapsed: audio.currentTime });
+  },
+
+  cycleRepeat() {
+    const next: RepeatMode =
+      get().repeat === 'off' ? 'all' : get().repeat === 'all' ? 'one' : 'off';
+    set({ repeat: next });
+    setSetting('repeat', next);
+  },
+
+  toggleShuffle() {
+    const next: ShuffleMode = get().shuffle === 'off' ? 'on' : 'off';
+    set({ shuffle: next });
+    setSetting('shuffle', next);
+
+    // 应用洗牌到当前队列（保留当前曲目位置）
+    const { queue, currentIndex, currentTrack } = get();
+    if (queue.length === 0) return;
+    const rest = queue.filter((_, i) => i !== currentIndex);
+    const shuffled = shuffleArray(rest);
+    const newQueue = currentTrack
+      ? [currentTrack.id, ...shuffled]
+      : shuffled;
+    set({ queue: newQueue, currentIndex: 0 });
+  },
+
+  setVolume(v) {
+    const vol = Math.min(1, Math.max(0, v));
+    get().audio.volume = vol;
+    set({ volume: vol });
+    setSetting('volume', vol);
+  },
+
+  teardown() {
+    const { audio } = get();
+    audio.pause();
+    audio.src = '';
+  },
+}));

@@ -1,0 +1,48 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# build output
+dist/
+dist-ssr/
+*.local
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# capacitor / ios
+ios/
+android/
+.capacitor/
+
+# tsc build artifacts
+*.tsbuildinfo
+.tsbuild/
+capacitor.config.js
+capacitor.config.d.ts
+vite.config.js
+vite.config.d.ts
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env
+.env
+.env.local
+.env.*.local
+
+# bundles
+*.tar.gz
+*.zip
