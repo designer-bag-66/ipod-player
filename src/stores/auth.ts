@@ -35,6 +35,8 @@ interface AuthState {
 
   /** 调试信息：扫码成功但 fetchAccount 失败时记录原因 */
   accountError: string;
+  /** 调试信息：登录流程实时状态（显示在登录页，便于排查） */
+  loginDebug: string;
 
   bootstrap(): Promise<void>;
   startLogin(): Promise<void>;
@@ -59,6 +61,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   errorMessage: '',
   lastCheck: 0,
   accountError: '',
+  loginDebug: '',
 
   async bootstrap() {
     const online = await checkApiAvailable();
@@ -95,7 +98,7 @@ export const useAuth = create<AuthState>((set, get) => ({
 
   async startLogin() {
     pollFailCount = 0;
-    set({ qrStatus: 'idle', qrImg: '', errorMessage: '', accountError: '' });
+    set({ qrStatus: 'idle', qrImg: '', errorMessage: '', accountError: '', loginDebug: '生成二维码…' });
     try {
       qrKey = await loginQrKey();
       const { qrimg } = await loginQrCreate(qrKey);
@@ -115,7 +118,10 @@ export const useAuth = create<AuthState>((set, get) => ({
     try {
       const r = await loginQrCheck(qrKey);
       pollFailCount = 0;
-      set({ lastCheck: Date.now() });
+      set({
+        lastCheck: Date.now(),
+        loginDebug: `轮询 code=${r.code} ${r.message ?? ''} cookieLen=${r.cookie?.length ?? 0}`,
+      });
       if (r.code === 800) {
         // 等待扫码
       } else if (r.code === 801) {
@@ -132,7 +138,7 @@ export const useAuth = create<AuthState>((set, get) => ({
             account: { id: r.profile.userId },
             profile: r.profile,
           };
-          set({ user, qrStatus: 'success', accountError: '' });
+          set({ user, qrStatus: 'success', accountError: '', loginDebug: '登录成功（QR profile）' });
           console.log('[auth] login via QR profile', user);
         } else {
           // 否则用 cookie 拉一次 account
@@ -145,13 +151,14 @@ export const useAuth = create<AuthState>((set, get) => ({
             console.error('[auth] fetchAccount error', err);
           }
           if (user) {
-            set({ user, qrStatus: 'success', accountError: '' });
+            set({ user, qrStatus: 'success', accountError: '', loginDebug: '登录成功（cookie）' });
             console.log('[auth] login via cookie', user);
           } else {
             // cookie 已存但 fetch 失败 —— 保留 cookie，让 UI 显式提示可重试
             set({
               qrStatus: 'success',
               accountError: '扫码成功但获取用户信息失败，请按 SELECT 重试',
+              loginDebug: `802 已确认 cookieLen=${r.cookie?.length ?? 0} err=${errMsg || '无 profile'}`,
             });
             console.warn('[auth] 802 but no user', r);
           }
@@ -167,6 +174,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       // 偶发超时/网络抖动不打断轮询，连续失败 3 次才提示错误
       pollFailCount += 1;
       console.warn(`[auth] poll failed x${pollFailCount}`, err);
+      set({ loginDebug: `轮询失败 x${pollFailCount}: ${err?.message ?? err}` });
       if (pollFailCount >= 3) {
         set({ qrStatus: 'error', errorMessage: String(err) });
       }
@@ -197,7 +205,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     }
     qrKey = '';
     pollFailCount = 0;
-    set({ qrImg: '', qrStatus: 'idle', errorMessage: '', accountError: '' });
+    set({ qrImg: '', qrStatus: 'idle', errorMessage: '', accountError: '', loginDebug: '' });
   },
 
   logout() {
@@ -211,6 +219,14 @@ export const useAuth = create<AuthState>((set, get) => ({
   },
 }));
 
+let pollRunning = false;
+
 async function poll() {
-  await useAuth.getState().pollLogin();
+  if (pollRunning) return; // 避免上一轮未返回时叠加请求
+  pollRunning = true;
+  try {
+    await useAuth.getState().pollLogin();
+  } finally {
+    pollRunning = false;
+  }
 }
