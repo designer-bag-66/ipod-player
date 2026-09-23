@@ -21,6 +21,77 @@ import {
   type NetEaseTrack,
 } from '@/services/netease';
 
+// ---------------- 音效（EQ） ----------------
+
+export type EqMode = 'off' | 'pop' | 'rock' | 'classic' | 'jazz' | 'bass';
+
+export const EQ_LABELS: Record<EqMode, string> = {
+  off: '关闭',
+  pop: '流行',
+  rock: '摇滚',
+  classic: '古典',
+  jazz: '爵士',
+  bass: '低音增强',
+};
+
+export const EQ_ORDER: EqMode[] = ['off', 'pop', 'rock', 'classic', 'jazz', 'bass'];
+
+/** 预设：[低频架(120Hz)dB, 峰值(1kHz)dB, 高频架(6kHz)dB] */
+const EQ_PRESETS: Record<EqMode, [number, number, number]> = {
+  off: [0, 0, 0],
+  pop: [2, 1.5, 2],
+  rock: [4.5, -1, 3],
+  classic: [1, 0, 4],
+  jazz: [3, 2, 1.5],
+  bass: [7, 0, -1],
+};
+
+// Web Audio EQ 链（惰性创建，仅在选择非关闭音效后启用）
+let eqCtx: AudioContext | null = null;
+let eqFilters: BiquadFilterNode[] | null = null;
+
+function ensureEqChain(audio: HTMLAudioElement) {
+  if (eqFilters) return;
+  try {
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const src = ctx.createMediaElementSource(audio);
+    const low = ctx.createBiquadFilter();
+    low.type = 'lowshelf';
+    low.frequency.value = 120;
+    const mid = ctx.createBiquadFilter();
+    mid.type = 'peaking';
+    mid.frequency.value = 1000;
+    mid.Q.value = 0.8;
+    const high = ctx.createBiquadFilter();
+    high.type = 'highshelf';
+    high.frequency.value = 6000;
+    src.connect(low);
+    low.connect(mid);
+    mid.connect(high);
+    high.connect(ctx.destination);
+    eqCtx = ctx;
+    eqFilters = [low, mid, high];
+  } catch (err) {
+    console.warn('[player] EQ init failed', err);
+  }
+}
+
+function applyEqGain(mode: EqMode) {
+  if (!eqFilters) return;
+  const [l, m, h] = EQ_PRESETS[mode];
+  eqFilters[0].gain.value = l;
+  eqFilters[1].gain.value = m;
+  eqFilters[2].gain.value = h;
+}
+
+function resumeEq() {
+  if (eqCtx && eqCtx.state === 'suspended') {
+    eqCtx.resume().catch(() => {});
+  }
+}
+
 interface PlayerStore extends PlayerState {
   /** 当前播放的 Track（用于 NowPlaying） */
   currentTrack: Track | null;
@@ -41,6 +112,9 @@ interface PlayerStore extends PlayerState {
   cycleRepeat(): void;
   toggleShuffle(): void;
   setVolume(v: number): void;
+  eq: EqMode;
+  setEq(mode: EqMode): void;
+  cycleEq(): void;
   teardown(): void;
 }
 
@@ -108,6 +182,7 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
   shuffle: 'off',
   repeat: 'off',
   volume: 1,
+  eq: 'off',
   currentTrack: null,
   audio: new Audio(),
   rafId: null,
@@ -122,11 +197,13 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
       getSetting<RepeatMode>('repeat'),
       getSetting<ShuffleMode>('shuffle'),
       getSetting<number>('volume'),
+      getSetting<EqMode>('eq'),
     ]);
     set({
       repeat: settings[0] ?? 'off',
       shuffle: settings[1] ?? 'off',
       volume: settings[2] ?? 1,
+      eq: settings[3] ?? 'off',
     });
     audio.volume = get().volume;
 
@@ -204,6 +281,14 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
       status: 'loading',
     });
     await updateMediaSessionMetadata(track);
+
+    // 音效开启时确保 EQ 链已接入并恢复 AudioContext
+    if (get().eq !== 'off') {
+      ensureEqChain(audio);
+      applyEqGain(get().eq);
+      resumeEq();
+    }
+
     try {
       await audio.play();
       set({ status: 'playing' });
@@ -221,7 +306,9 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
       artist: track.ar.map((a) => a.name).join(' / '),
       album: track.al.name,
       duration: track.dt / 1000,
-      artworkUrl: `${track.al.picUrl}?param=300y300`,
+      artworkUrl: track.al.picUrl
+        ? `${track.al.picUrl.replace(/^http:/, 'https:')}?param=300y300`
+        : undefined,
       fileName: 'netease.mp3',
       importedAt: Date.now(),
       liked: false,
@@ -349,6 +436,25 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
     get().audio.volume = vol;
     set({ volume: vol });
     setSetting('volume', vol);
+  },
+
+  setEq(mode) {
+    set({ eq: mode });
+    setSetting('eq', mode);
+    if (mode !== 'off') {
+      ensureEqChain(get().audio);
+      applyEqGain(mode);
+      resumeEq();
+    } else if (eqFilters) {
+      applyEqGain('off');
+    }
+  },
+
+  cycleEq() {
+    const cur = get().eq;
+    const idx = EQ_ORDER.indexOf(cur);
+    const next = EQ_ORDER[(idx + 1) % EQ_ORDER.length];
+    get().setEq(next);
   },
 
   teardown() {
