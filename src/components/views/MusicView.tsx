@@ -107,7 +107,7 @@ export function MusicView() {
       );
     } else {
       pushItem(
-        { kind: 'title', label: `服务离线 · ${apiError.slice(0, 40) || '请求超时'}` },
+        { kind: 'title', label: `服务离线 · ${apiError.slice(0, 60) || '请求超时'}` },
         () => {},
       );
       pushItem(
