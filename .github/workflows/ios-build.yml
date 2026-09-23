@@ -35,7 +35,9 @@ jobs:
           cd ios/App
           pod install
 
-      - name: Archive (xcodebuild)
+      # 直接 build 出无签名的 .app，然后用 zip 打成一个无签名 IPA
+      # 这是给 Sideloadly 等工具二次签名的中间产物
+      - name: Build (unsigned)
         run: |
           cd ios/App
           xcodebuild \
@@ -43,41 +45,23 @@ jobs:
             -scheme App \
             -configuration Release \
             -sdk iphoneos \
-            -archivePath build/App.xcarchive \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            archive
+            CODE_SIGN_IDENTITY=""
 
-      - name: Export unsigned IPA
+      - name: Package IPA
         run: |
-          cd ios/App
-          mkdir -p build/ipa
-          cat > ExportOptions.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>development</string>
-              <key>signingStyle</key>
-              <string>manual</string>
-              <key>compileBitcode</key>
-              <false/>
-              <key>destination</key>
-              <string>export</string>
-          </dict>
-          </plist>
-          EOF
-          xcodebuild -exportArchive \
-            -archivePath build/App.xcarchive \
-            -exportPath build/ipa \
-            -exportOptionsPlist ExportOptions.plist
+          cd ios/App/build/Build/Products/Release-iphoneos
+          mkdir -p Payload
+          cp -r App.app Payload/
+          zip -ry ../App.ipa Payload
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: ipodplayer-ipa
-          path: ios/App/build/ipa/*.ipa
+          path: ios/App/build/App.ipa
           if-no-files-found: error
           retention-days: 14
