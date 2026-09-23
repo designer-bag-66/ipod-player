@@ -92,6 +92,32 @@ export function clearCookie() {
   } catch {}
 }
 
+// ---------------- 登录态缓存 ----------------
+// 冷启动/网络抖动导致 /user/account 暂时拿不到资料时，用缓存维持登录态，避免被踢出
+
+const USER_KEY = 'netease_user';
+
+export function loadCachedUser(): NetEaseUser | null {
+  try {
+    const s = localStorage.getItem(USER_KEY);
+    return s ? (JSON.parse(s) as NetEaseUser) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCachedUser(user: NetEaseUser) {
+  try {
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  } catch {}
+}
+
+export function clearCachedUser() {
+  try {
+    localStorage.removeItem(USER_KEY);
+  } catch {}
+}
+
 export function hasCookie(): boolean {
   return _cookie.length > 0;
 }
