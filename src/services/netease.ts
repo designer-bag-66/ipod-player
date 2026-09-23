@@ -50,6 +50,19 @@ export const NETEASE_BASE_URL = BASE;
 const COOKIE_KEY = 'netease_cookie';
 let _cookie = localStorage.getItem(COOKIE_KEY) ?? '';
 
+/** fetch 超时（ms）：防止 WKWebView 中请求挂起导致永远无响应 */
+export const FETCH_TIMEOUT_MS = 10000;
+
+export async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 function setCookie(value: string) {
   _cookie = value;
   try {
@@ -84,7 +97,7 @@ async function call<T = any>(path: string, params: Record<string, string | numbe
   }
   const url = `${BASE}${path}${qs.toString() ? '?' + qs.toString() : ''}`;
   console.log('[netease] request', path, 'cookie-sent?', !!_cookie, _cookie ? _cookie.slice(0, 60) : '');
-  const res = await fetch(url, { headers });
+  const res = await fetchWithTimeout(url, { headers });
   const json: any = await res.json();
   // 提取 set-cookie 风格的 cookie（部分接口会回传）
   if (typeof json?.cookie === 'string' && json.cookie.length > 0) {
@@ -227,7 +240,7 @@ export function getLastApiError(): string {
 export async function checkApiAvailable(): Promise<boolean> {
   _lastApiError = '';
   try {
-    const res = await fetch(`${BASE}/banner?type=0&_t=${Date.now()}`);
+    const res = await fetchWithTimeout(`${BASE}/banner?type=0&_t=${Date.now()}`);
     let json: any;
     try {
       json = await res.json();
@@ -241,7 +254,10 @@ export async function checkApiAvailable(): Promise<boolean> {
     }
     return true;
   } catch (err: any) {
-    const msg = String(err?.message ?? err);
+    const msg =
+      err?.name === 'AbortError'
+        ? `请求超时（${FETCH_TIMEOUT_MS / 1000}s 无响应）`
+        : String(err?.message ?? err);
     _lastApiError = msg.slice(0, 80);
     return false;
   }
