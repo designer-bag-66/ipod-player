@@ -65,6 +65,55 @@ export const NETEASE_BASE_URL = NETEASE_BASES[0];
 const COOKIE_KEY = 'netease_cookie';
 let _cookie = localStorage.getItem(COOKIE_KEY) ?? '';
 
+// ---------------- 原生存储封装 ----------------
+// iOS 自定义 scheme 下 localStorage 可能被系统回收，关键数据同步写入
+// Capacitor Preferences（原生 UserDefaults），读取时优先用原生值
+
+import { Capacitor } from '@capacitor/core';
+import { Preferences } from '@capacitor/preferences';
+
+async function prefGet(key: string): Promise<string | null> {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      const { value } = await Preferences.get({ key });
+      return value ?? null;
+    }
+  } catch (err) {
+    console.warn('[store] Preferences.get failed', key, err);
+  }
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+async function prefSet(key: string, value: string): Promise<void> {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+  try {
+    if (Capacitor.isNativePlatform()) {
+      await Preferences.set({ key, value });
+    }
+  } catch (err) {
+    console.warn('[store] Preferences.set failed', key, err);
+  }
+}
+
+async function prefRemove(key: string): Promise<void> {
+  try {
+    localStorage.removeItem(key);
+  } catch {}
+  try {
+    if (Capacitor.isNativePlatform()) {
+      await Preferences.remove({ key });
+    }
+  } catch (err) {
+    console.warn('[store] Preferences.remove failed', key, err);
+  }
+}
+
 /** fetch 超时（ms）：防止 WKWebView 中请求挂起；Vercel 冷启动可能较慢，放宽到 20s */
 export const FETCH_TIMEOUT_MS = 20000;
 
@@ -80,42 +129,59 @@ export async function fetchWithTimeout(url: string, init?: RequestInit): Promise
 
 function setCookie(value: string) {
   _cookie = value;
-  try {
-    localStorage.setItem(COOKIE_KEY, value);
-  } catch {}
+  void prefSet(COOKIE_KEY, value);
 }
 
 export function clearCookie() {
   _cookie = '';
-  try {
-    localStorage.removeItem(COOKIE_KEY);
-  } catch {}
+  void prefRemove(COOKIE_KEY);
 }
 
 // ---------------- 登录态缓存 ----------------
 // 冷启动/网络抖动导致 /user/account 暂时拿不到资料时，用缓存维持登录态，避免被踢出
+// 同时写入原生存储，避免切后台后 localStorage 被回收导致掉线
 
 const USER_KEY = 'netease_user';
+let _cachedUser: NetEaseUser | null = null;
 
 export function loadCachedUser(): NetEaseUser | null {
+  if (_cachedUser) return _cachedUser;
   try {
     const s = localStorage.getItem(USER_KEY);
-    return s ? (JSON.parse(s) as NetEaseUser) : null;
-  } catch {
-    return null;
-  }
+    if (s) {
+      _cachedUser = JSON.parse(s) as NetEaseUser;
+      return _cachedUser;
+    }
+  } catch {}
+  return null;
 }
 
 export function saveCachedUser(user: NetEaseUser) {
-  try {
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
-  } catch {}
+  _cachedUser = user;
+  void prefSet(USER_KEY, JSON.stringify(user));
 }
 
 export function clearCachedUser() {
-  try {
-    localStorage.removeItem(USER_KEY);
-  } catch {}
+  _cachedUser = null;
+  void prefRemove(USER_KEY);
+}
+
+/** 启动时从原生存储恢复 cookie + 登录态（localStorage 可能被系统回收） */
+export async function restoreSession(): Promise<{ cookie: boolean; user: NetEaseUser | null }> {
+  const [cookie, userJson] = await Promise.all([prefGet(COOKIE_KEY), prefGet(USER_KEY)]);
+  if (cookie) {
+    _cookie = cookie;
+    try {
+      localStorage.setItem(COOKIE_KEY, cookie);
+    } catch {}
+  }
+  if (userJson) {
+    try {
+      _cachedUser = JSON.parse(userJson) as NetEaseUser;
+      localStorage.setItem(USER_KEY, userJson);
+    } catch {}
+  }
+  return { cookie: !!cookie, user: _cachedUser };
 }
 
 export function hasCookie(): boolean {
