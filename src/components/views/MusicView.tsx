@@ -18,6 +18,7 @@ export function MusicView() {
   const playlists = useLibrary((s) => s.playlists);
   const neUser = useAuth((s) => s.user);
   const apiOnline = useAuth((s) => s.apiOnline);
+  const apiError = useAuth((s) => s.errorMessage);
   const logout = useAuth((s) => s.logout);
   const push = useNavigation((s) => s.push);
   const setItems = useNavigation((s) => s.setItems);
@@ -103,7 +104,7 @@ export function MusicView() {
       );
     } else {
       pushItem(
-        { kind: 'title', label: '服务离线' },
+        { kind: 'title', label: `服务离线 · ${apiError.slice(0, 30)}` },
         () => {},
       );
     }
@@ -135,6 +136,7 @@ export function MusicView() {
     nePlaylists,
     neLoading,
     apiOnline,
+    apiError,
     push,
     logout,
     setItems,
