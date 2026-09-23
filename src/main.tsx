@@ -11,6 +11,8 @@ import { useNavigation } from '@/stores/navigation';
 import { IPodShell } from '@/components/shell/IPodShell';
 import { Screen as ScreenShell } from '@/components/shell/Screen';
 import { ClickWheel } from '@/components/shell/ClickWheel';
+import { QuickPanel, type QuickAdjust } from '@/components/shell/QuickPanel';
+import { getSetting, setSetting } from '@/services/storage';
 import { NavTransition, type NavAnimState } from '@/components/shell/NavTransition';
 import { HomeView } from '@/components/views/HomeView';
 import { MusicView, selectMusicItem } from '@/components/views/MusicView';
@@ -56,11 +58,29 @@ export function App() {
   const [popping, setPopping] = useState(false);
   const navTimersRef = useRef<number[]>([]);
 
+  // 快捷面板（主菜单按 MENU）：播放列表 / 亮度 / 音量
+  const [quick, setQuick] = useState<{ open: boolean; row: number; adjusting: QuickAdjust }>({
+    open: false,
+    row: 0,
+    adjusting: 'none',
+  });
+  const [brightness, setBrightness] = useState(1);
+  const volume = usePlayer((s) => s.volume);
+
   useEffect(() => {
     init();
     playerInit();
     useAuth.getState().bootstrap();
+    getSetting<number>('brightness').then((b) => {
+      if (typeof b === 'number' && b > 0) setBrightness(b);
+    });
   }, [init, playerInit]);
+
+  function applyBrightness(v: number) {
+    const val = Math.min(1, Math.max(0.3, v));
+    setBrightness(val);
+    setSetting('brightness', val);
+  }
 
   // 卸载时清理 timer
   useEffect(() => {
@@ -136,6 +156,25 @@ export function App() {
 
   // SELECT 处理
   function handleSelect() {
+    // 快捷面板打开时，SELECT 只作用于面板
+    if (quick.open) {
+      if (quick.adjusting !== 'none') {
+        setQuick((q) => ({ ...q, adjusting: 'none' }));
+      } else if (quick.row === 0) {
+        setQuick({ open: false, row: 0, adjusting: 'none' });
+        push(
+          neUser
+            ? { name: 'netease.playlists' }
+            : { name: 'netease.login' },
+        );
+      } else if (quick.row === 1) {
+        setQuick((q) => ({ ...q, adjusting: 'bright' }));
+      } else {
+        setQuick((q) => ({ ...q, adjusting: 'vol' }));
+      }
+      return;
+    }
+
     const item = items[selectedIndex];
     switch (current.name) {
       case 'home': {
@@ -207,7 +246,20 @@ export function App() {
 
   // MENU / 返回
   function handleMenu() {
-    if (current.name === 'home') return;
+    // 快捷面板：调节中先回到面板，否则关闭
+    if (quick.open) {
+      if (quick.adjusting !== 'none') {
+        setQuick((q) => ({ ...q, adjusting: 'none' }));
+      } else {
+        setQuick({ open: false, row: 0, adjusting: 'none' });
+      }
+      return;
+    }
+    // 主菜单：按 MENU 展开快捷面板
+    if (current.name === 'home') {
+      setQuick({ open: true, row: 0, adjusting: 'none' });
+      return;
+    }
     const iconRect = getHomeIconRect(homeIndex);
     const screenRect = getScreenBezelRect();
     setPopping(true);
@@ -276,12 +328,37 @@ export function App() {
           onPrev={() => usePlayer.getState().previous()}
           onNext={() => usePlayer.getState().next()}
           onPlayPause={() => usePlayer.getState().toggle()}
-          onWheel={(d) => moveIndex(d)}
+          onWheel={(d) => {
+            if (quick.open) {
+              if (quick.adjusting === 'bright') {
+                applyBrightness(brightness + d * 0.05);
+              } else if (quick.adjusting === 'vol') {
+                usePlayer.getState().setVolume(volume + d * 0.05);
+              } else {
+                setQuick((q) => ({
+                  ...q,
+                  row: Math.min(2, Math.max(0, q.row + d)),
+                }));
+              }
+              return;
+            }
+            moveIndex(d);
+          }}
+          onLongPress={() => push({ name: 'now-playing' })}
           isPlaying={status === 'playing'}
         />
       }
     >
-      <ScreenShell title={title}>{renderBody()}</ScreenShell>
+      <ScreenShell title={title} brightness={brightness}>
+        {renderBody()}
+        <QuickPanel
+          open={quick.open}
+          row={quick.row}
+          adjusting={quick.adjusting}
+          brightness={brightness}
+          volume={volume}
+        />
+      </ScreenShell>
       <NavTransition state={navAnim} duration={NAV_ANIM_MS} />
     </IPodShell>
   );
