@@ -50,8 +50,9 @@ body {
 
 /* ---------- iPod 外壳 ---------- */
 .ipod-shell {
-  width: min(420px, min(92vw, 42dvh));
-  max-height: 100dvh;
+  /* 用 vw/vh（非 dvh）：dvh 在切后台/恢复时会变化，导致外壳尺寸跳变 */
+  width: min(420px, min(92vw, 42vh));
+  max-height: 100vh;
   margin: 0 auto;
   padding: clamp(8px, 2vw, 14px);
   background: #000000;
