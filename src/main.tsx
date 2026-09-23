@@ -188,6 +188,8 @@ export function App() {
           if (item.kind === 'action') {
             if (item.label === '重试获取用户信息') {
               useAuth.getState().refreshAccount();
+            } else if (item.label === '重试连接') {
+              useAuth.getState().bootstrap();
             } else {
               useAuth.getState().startLogin();
             }
