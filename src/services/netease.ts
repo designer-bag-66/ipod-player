@@ -39,7 +39,14 @@ export interface NetEaseUser {
   };
 }
 
-const BASE = '/netease';
+// 远程 API（Vercel 部署的 NeteaseCloudMusicApi，CORS 默认全开）
+// 本地开发如需走 Vite 代理，在 .env.local 设置 VITE_NETEASE_API=/netease
+const BASE: string =
+  ((import.meta as any).env?.VITE_NETEASE_API as string | undefined) ||
+  'https://api-enhanced-five-puce.vercel.app';
+
+export const NETEASE_BASE_URL = BASE;
+
 const COOKIE_KEY = 'netease_cookie';
 let _cookie = localStorage.getItem(COOKIE_KEY) ?? '';
 
@@ -66,9 +73,16 @@ async function call<T = any>(path: string, params: Record<string, string | numbe
   for (const [k, v] of Object.entries(params)) qs.set(k, String(v));
   // 避免缓存
   qs.set('_t', String(Date.now()));
-  const url = `${BASE}${path}${qs.toString() ? '?' + qs.toString() : ''}`;
   const headers: Record<string, string> = {};
-  if (_cookie) headers['Cookie'] = _cookie;
+  if (_cookie) {
+    if (BASE.startsWith('http')) {
+      // 跨域 fetch 不允许自定义 Cookie 请求头，改用 query 参数传递
+      qs.set('cookie', _cookie);
+    } else {
+      headers['Cookie'] = _cookie;
+    }
+  }
+  const url = `${BASE}${path}${qs.toString() ? '?' + qs.toString() : ''}`;
   console.log('[netease] request', path, 'cookie-sent?', !!_cookie, _cookie ? _cookie.slice(0, 60) : '');
   const res = await fetch(url, { headers });
   const json: any = await res.json();
