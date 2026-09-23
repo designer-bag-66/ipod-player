@@ -17,6 +17,7 @@ import {
   loadCachedUser,
   saveCachedUser,
   clearCachedUser,
+  restoreSession,
   type NetEaseUser,
 } from '@/services/netease';
 
@@ -67,6 +68,16 @@ export const useAuth = create<AuthState>((set, get) => ({
   loginDebug: '',
 
   async bootstrap() {
+    // 先从原生存储恢复登录态（localStorage 在 iOS 切后台后可能被回收）
+    try {
+      const restored = await restoreSession();
+      if (restored.user && !get().user) {
+        set({ user: restored.user });
+      }
+    } catch (err) {
+      console.warn('[auth] restoreSession failed', err);
+    }
+
     const online = await checkApiAvailable();
     if (!online) {
       const reason = getLastApiError();
