@@ -227,6 +227,17 @@ body {
   transition: inherit;
 }
 
+/* ---------- 主页列表布局 ---------- */
+.home-list {
+  padding: 0 4px 10px;
+}
+
+/* 列表行可点按（触摸设备） */
+.list-row-tappable {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* ---------- 玻璃卡片（通用） ---------- */
 .glass-card {
   background: var(--glass-bg);
