@@ -71,6 +71,8 @@ export type Screen =
   | { name: 'search' }
   | { name: 'settings' }
   | { name: 'settings.netease' }
+  /** 布局调整（显示框 / 滚轮） */
+  | { name: 'layout' }
   // ---- 网易云 ----
   | { name: 'netease.login' }
   | { name: 'netease.playlists' }

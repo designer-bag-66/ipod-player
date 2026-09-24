@@ -162,11 +162,13 @@ body {
 
 /* ---------- 圆角显示屏 ---------- */
 .screen-bezel {
-  width: 100%;
+  width: var(--screen-w, 100%);
   aspect-ratio: var(--screen-ratio, 7 / 9);
   /* 设了固定高度就用高度（此时比例自动失效），否则跟随比例 */
   height: var(--screen-h, auto);
   margin-top: var(--screen-mt, 0px);
+  /* 布局调整：上下偏移（translate 不影响流式布局） */
+  transform: translateY(var(--screen-dy, 0px));
   min-height: 0;
   background: var(--bezel-bg, #0a0a0c);
   border-radius: var(--bezel-radius, 17px);

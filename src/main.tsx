@@ -36,6 +36,13 @@ import {
   playNeteaseSongAt,
 } from '@/components/views/NeteaseView';
 import { PlayQueueView, selectQueueItem } from '@/components/views/PlayQueueView';
+import {
+  LayoutView,
+  layoutSelect,
+  layoutWheel,
+  layoutIsAdjusting,
+  layoutMenu,
+} from '@/components/views/LayoutView';
 import { useAuth } from '@/stores/auth';
 import { usePrefs } from '@/stores/prefs';
 import { PREVIEW } from '@/dev/demoData';
@@ -192,6 +199,8 @@ export function App() {
         return '歌单';
       case 'play-queue':
         return '播放';
+      case 'layout':
+        return '布局调整';
     }
   })();
 
@@ -288,6 +297,9 @@ export function App() {
       case 'play-queue':
         selectQueueItem(selectedIndex);
         return;
+      case 'layout':
+        layoutSelect(selectedIndex);
+        return;
     }
   }
 
@@ -307,6 +319,8 @@ export function App() {
       setQuick({ open: true, row: 0, adjusting: 'none' });
       return;
     }
+    // 布局调整：调节中先退出调节，回到列表
+    if (current.name === 'layout' && layoutMenu()) return;
     const iconRect = getHomeIconRect(homeIndex);
     const screenRect = getScreenBezelRect();
     setPopping(true);
@@ -344,6 +358,8 @@ export function App() {
         return <NeteasePlaylistView playlistId={current.playlistId} />;
       case 'play-queue':
         return <PlayQueueView />;
+      case 'layout':
+        return <LayoutView />;
       default:
         return <HomeView onPick={openHomeIcon} />;
     }
@@ -371,6 +387,11 @@ export function App() {
                   row: Math.min(1, Math.max(0, q.row + d)),
                 }));
               }
+              return;
+            }
+            // 布局调整的调节态：滚轮改数值
+            if (current.name === 'layout' && layoutIsAdjusting()) {
+              layoutWheel(d);
               return;
             }
             moveIndex(d);

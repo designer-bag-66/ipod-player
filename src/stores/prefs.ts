@@ -73,6 +73,10 @@ export const HOME_LIST_POS_LABELS: Record<HomeListPos, string> = {
   bottom: '偏下',
 };
 
+// ---------------- 壳几何（显示框 / 滚轮，设备适配用） ----------------
+// 这些是**绝对值**（百分比或 px），在「设置 → 布局调整」里用滚轮自由调节，
+// 由 IPodShell 以行内 CSS 变量覆盖到壳上（优先于设计源 :root 上的同名变量）。
+
 /** 列表行间距（flex gap，px） */
 export const HOME_LIST_GAP = 2;
 
@@ -85,6 +89,16 @@ export interface PrefsValues {
   haptics: FeedbackLevel;
   /** 选择音效强度 */
   soundFeedback: FeedbackLevel;
+  /** 显示框宽度（% 外壳宽） */
+  screenW: number;
+  /** 显示框高度（px） */
+  screenH: number;
+  /** 显示框上下偏移（px，正=下移） */
+  screenDy: number;
+  /** 滚轮大小（% 外壳宽） */
+  wheelSize: number;
+  /** 滚轮上下偏移（px，正=下移） */
+  wheelDy: number;
   /** 自定义网易云 API 地址；空串 = 使用内置地址 */
   neteaseBase: string;
 }
@@ -96,6 +110,11 @@ const DEFAULTS: PrefsValues = {
   homeListPos: 'mid',
   haptics: 'mid',
   soundFeedback: 'mid',
+  screenW: 100,
+  screenH: 432,
+  screenDy: 0,
+  wheelSize: 90,
+  wheelDy: 0,
   neteaseBase: '',
 };
 
@@ -147,6 +166,11 @@ export const usePrefs = create<PrefsState>((set, get) => ({
       homeListPos: s.homeListPos,
       haptics: s.haptics,
       soundFeedback: s.soundFeedback,
+      screenW: s.screenW,
+      screenH: s.screenH,
+      screenDy: s.screenDy,
+      wheelSize: s.wheelSize,
+      wheelDy: s.wheelDy,
       neteaseBase: s.neteaseBase,
     });
   },

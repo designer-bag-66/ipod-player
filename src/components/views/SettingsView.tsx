@@ -48,6 +48,7 @@ export function SettingsView() {
 
   useEffect(() => {
     setItems([
+      { kind: 'action', label: '布局调整…', meta: '显示框 / 滚轮' },
       { kind: 'action', label: '触感反馈', meta: FEEDBACK_LABELS[haptics] },
       { kind: 'action', label: '选择音效', meta: FEEDBACK_LABELS[soundFeedback] },
       { kind: 'action', label: '循环模式', meta: repeatLabel(repeat) },
@@ -76,6 +77,9 @@ export function SettingsView() {
       // 一律从 store 读当前值：避免闭包拿到旧值导致「点第二次没反应」
       const prefs = usePrefs.getState();
       switch (label) {
+        case '布局调整…':
+          push({ name: 'layout' });
+          return;
         case '触感反馈': {
           const next =
             FEEDBACK_ORDER[(FEEDBACK_ORDER.indexOf(prefs.haptics) + 1) % FEEDBACK_ORDER.length];

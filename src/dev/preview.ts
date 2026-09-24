@@ -36,6 +36,8 @@ function resolveScreen(name: string): Screen | null {
       return { name: 'netease.playlist', playlistId: 101 };
     case 'play-queue':
       return { name: 'play-queue' };
+    case 'layout':
+      return { name: 'layout' };
     case 'now-playing':
       return { name: 'now-playing' };
     default:

@@ -48,7 +48,7 @@ export function Screen({ title, rightSlot, brightness = 1, hideStatusbar, childr
           </filter>
         </defs>
       </svg>
-      <div data-screen-bezel className="screen-bezel w-full">
+      <div data-screen-bezel className="screen-bezel">
         <div
           className="screen-surface w-full h-full flex flex-col"
           data-bg={bgMode}
