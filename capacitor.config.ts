@@ -11,6 +11,11 @@ const config: CapacitorConfig = {
     backgroundColor: '#000000',
   },
   plugins: {
+    // 让 WebView 里的 fetch 走原生 NSURLSession：绕过 WKWebView 的
+    // 跨域(CORS)/ATS 限制，手机访问第三方 API（网易云）更稳更可诊断
+    CapacitorHttp: {
+      enabled: true,
+    },
     StatusBar: {
       // 沉浸到 iPod 屏幕内
       style: 'DARK',

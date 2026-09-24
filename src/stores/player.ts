@@ -1,18 +1,19 @@
 // ============================================================
 // 播放器 Store（文档 3.2 PlayerState + 4.2 系统媒体）
 // 用单例 HTMLAudioElement + MediaSession API
+// 只播放在线曲目：网易云（音频直连 CDN，或本地开发走 /netease-stream 代理）
 // ============================================================
 
 import { create } from 'zustand';
-import type {
-  Track,
-  TrackID,
-  PlayerState,
-  RepeatMode,
-  ShuffleMode,
-} from '@/types';
-import { useLibrary } from './library';
+import type { Track, TrackID, PlayerState, RepeatMode, ShuffleMode } from '@/types';
 import { setSetting, getSetting } from '@/services/storage';
+import {
+  fetchSongUrl,
+  lookupNeteaseTrack,
+  getActiveBase,
+  type NetEaseTrack,
+  type SongUrlItem,
+} from '@/services/netease';
 
 interface PlayerStore extends PlayerState {
   /** 当前播放的 Track（用于 NowPlaying） */
@@ -24,6 +25,7 @@ interface PlayerStore extends PlayerState {
 
   init(): Promise<void>;
   playTrack(track: Track, queue?: TrackID[]): Promise<void>;
+  playNeteaseTrack(track: NetEaseTrack, queue: NetEaseTrack[]): Promise<void>;
   toggle(): Promise<void>;
   play(): Promise<void>;
   pause(): Promise<void>;
@@ -107,7 +109,6 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
   async init() {
     const audio = get().audio;
     audio.preload = 'auto';
-    audio.crossOrigin = 'anonymous';
 
     // 恢复设置
     const settings = await Promise.all([
@@ -154,18 +155,42 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
 
   async playTrack(track, queue) {
     const audio = get().audio;
-    const lib = useLibrary.getState();
-    const url = await lib.getBlobUrl(track.id);
-    if (!url) {
-      console.warn('[player] blob not found', track.id);
+    if (!track.id.startsWith('netease:')) {
+      console.warn('[player] 本地曲库已移除，只能播放在线曲目:', track.id);
       return;
     }
 
-    const fullQueue =
-      queue ??
-      (get().queue.length > 0
-        ? get().queue
-        : lib.tracks.map((t) => t.id));
+    const neId = Number(track.id.slice(8));
+    let item: SongUrlItem | null = null;
+    try {
+      item = await fetchSongUrl(neId, 320000);
+    } catch (err) {
+      // 网络/API 不可达：以前这里会直接抛出去，把调用方的后续流程一起打断
+      console.warn('[player] netease song url failed', neId, err);
+      set({ status: 'error' });
+      return;
+    }
+    if (!item?.url) {
+      console.warn('[player] netease track no url (VIP?)', neId);
+      set({ status: 'error' });
+      return;
+    }
+
+    // 远程 API：音频直连网易云 CDN（audio.src 不受 CORS 限制）
+    // 仅当 API 本身是 https 时才把音频地址也升到 https（过 iOS ATS）；
+    // 若 API 是 http（例如局域网自建），保持原样，否则 http 音频会加载失败
+    // 本地开发（BASE=/netease）：走 Vite 流代理
+    let url: string;
+    const base = getActiveBase();
+    if (!base.startsWith('http')) {
+      url = `/netease-stream?u=${encodeURIComponent(item.url)}`;
+    } else if (base.startsWith('https')) {
+      url = item.url.replace(/^http:/, 'https:');
+    } else {
+      url = item.url;
+    }
+
+    const fullQueue = queue ?? get().queue;
     const idx = fullQueue.indexOf(track.id);
 
     audio.src = url;
@@ -178,6 +203,7 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
       status: 'loading',
     });
     await updateMediaSessionMetadata(track);
+
     try {
       await audio.play();
       set({ status: 'playing' });
@@ -185,6 +211,22 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
       console.error('[player] play failed', err);
       set({ status: 'error' });
     }
+  },
+
+  async playNeteaseTrack(track, queue) {
+    const localId = `netease:${track.id}`;
+    const fakeTrack: Track = {
+      id: localId,
+      title: track.name,
+      artist: track.ar.map((a) => a.name).join(' / '),
+      album: track.al.name,
+      duration: track.dt / 1000,
+      artworkUrl: track.al.picUrl
+        ? `${track.al.picUrl.replace(/^http:/, 'https:')}?param=300y300`
+        : undefined,
+    };
+    const queueIds = queue.map((t) => `netease:${t.id}`);
+    await get().playTrack(fakeTrack, queueIds);
   },
 
   async toggle() {
@@ -224,11 +266,13 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
       else return s.pause();
     }
 
-    const lib = useLibrary.getState();
-    const nextTrack = lib.tracks.find((t) => t.id === s.queue[nextIdx]);
-    if (!nextTrack) return;
-    await get().playTrack(nextTrack, s.queue);
-    set({ currentIndex: nextIdx });
+    // 队列里的曲目都是网易云曲目（queue id 前缀 netease:）
+    const neTrack = lookupNeteaseTrack(s.queue[nextIdx]);
+    if (neTrack) {
+      const q = s.queue.map((id) => lookupNeteaseTrack(id)).filter(Boolean) as NetEaseTrack[];
+      await get().playNeteaseTrack(neTrack, q);
+      set({ currentIndex: nextIdx });
+    }
   },
 
   async previous() {
@@ -244,11 +288,12 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
     let prevIdx = s.currentIndex - 1;
     if (prevIdx < 0) prevIdx = s.repeat === 'all' ? s.queue.length - 1 : 0;
 
-    const lib = useLibrary.getState();
-    const prevTrack = lib.tracks.find((t) => t.id === s.queue[prevIdx]);
-    if (!prevTrack) return;
-    await get().playTrack(prevTrack, s.queue);
-    set({ currentIndex: prevIdx });
+    const neTrack = lookupNeteaseTrack(s.queue[prevIdx]);
+    if (neTrack) {
+      const q = s.queue.map((id) => lookupNeteaseTrack(id)).filter(Boolean) as NetEaseTrack[];
+      await get().playNeteaseTrack(neTrack, q);
+      set({ currentIndex: prevIdx });
+    }
   },
 
   async seek(elapsed) {

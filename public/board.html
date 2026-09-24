@@ -1,0 +1,979 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>iPod Player · 界面评审板</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1c1f26;
+    --line: #2b3038;
+    --text: #e6e9ef;
+    --dim: #98a1b0;
+    --accent: #4c8eff;
+    --ref: #b06cff;
+    --warn: #ffb020;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+  /* ---------------- 顶部固定区 ---------------- */
+  .head {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(20, 22, 26, .94);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    padding: 10px 16px;
+  }
+  .bar h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 700; white-space: nowrap; }
+  .bar .sep { width: 1px; height: 22px; background: var(--line); }
+  .bar .hint { color: var(--dim); font-size: 12px; }
+  .bar .grow { flex: 1 1 auto; }
+
+  button, .swatch {
+    font: inherit; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 5px 10px; cursor: pointer;
+    transition: background .12s, border-color .12s, transform .12s;
+  }
+  button:hover { background: #23272f; }
+  button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:active { transform: translateY(1px); }
+  button.primary { background: #2a2f3a; border-color: #3b4250; }
+  button.primary:hover { background: #333a47; }
+
+  .swatch { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px solid var(--line); }
+  .swatch.on { border-color: #fff; transform: scale(1.12); }
+
+  .sizes { display: flex; gap: 6px; align-items: center; }
+  .sizes button { width: 30px; height: 26px; padding: 0; display: grid; place-items: center; }
+  .sizes .dot { display: block; border-radius: 50%; background: currentColor; }
+
+  /* ---------------- 全局布局调节 ---------------- */
+  .layout {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px;
+    padding: 8px 16px 10px;
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, .015);
+  }
+  .layout .lt { font-size: 12px; font-weight: 700; color: var(--warn); white-space: nowrap; }
+  .layout label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+  .layout input[type=range] { width: 116px; accent-color: var(--warn); }
+  .layout b { color: var(--text); font-weight: 600; min-width: 54px; display: inline-block; font-variant-numeric: tabular-nums; }
+  .layout .note { color: #6b7482; font-size: 11px; }
+
+  /* ---------------- 网格 ---------------- */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+    gap: 18px;
+    padding: 18px;
+    align-items: start;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .card.ref { border-color: #3d2f52; }
+  .card > header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .card > header .no {
+    height: 20px; min-width: 20px; padding: 0 5px; flex: 0 0 auto;
+    display: grid; place-items: center;
+    border-radius: 6px; background: #2b3038;
+    font-size: 11px; font-weight: 700; color: var(--dim);
+  }
+  .card.ref > header .no { background: var(--ref); color: #fff; }
+  .card > header .name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
+  .card > header .flag {
+    font-size: 11px; color: #fff; background: var(--accent);
+    border-radius: 999px; padding: 1px 7px;
+  }
+  .card > header .grow { flex: 1 1 auto; }
+  .card > header button { padding: 3px 9px; font-size: 12px; }
+
+  .stage { position: relative; background: #000; margin: 0 auto; overflow: hidden; }
+  .stage iframe { display: block; width: 100%; height: 100%; border: 0; }
+  .stage img.ref-img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .stage canvas.ink {
+    position: absolute; inset: 0;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  body.browse .stage canvas.ink { pointer-events: none; cursor: default; }
+
+  .note {
+    display: block; width: 100%; min-height: 74px; resize: vertical;
+    padding: 10px 12px;
+    background: #171a20; color: var(--text);
+    border: 0; border-top: 1px solid var(--line);
+    font: inherit; outline: none;
+  }
+  .note::placeholder { color: #6b7482; }
+  .note:focus { background: #191d24; }
+
+  body.dragging::after {
+    content: '松开即可把图片加为参考图';
+    position: fixed; inset: 0; z-index: 99;
+    display: grid; place-items: center;
+    background: rgba(76, 142, 255, .14);
+    border: 3px dashed var(--accent);
+    color: #cfe0ff; font-size: 18px; font-weight: 700;
+    pointer-events: none;
+  }
+
+  .warn, .empty-ref {
+    margin: 18px; padding: 12px 14px; border-radius: 10px;
+    background: #3a2a12; border: 1px solid #6b4a15; color: #f2d08a;
+  }
+  .empty-ref { background: #1d2430; border-color: #2f3d52; color: var(--dim); }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <div class="bar">
+    <h1>iPod Player · 界面评审板</h1>
+
+    <button id="tPen" class="on" title="自由画线">✏️ 画笔</button>
+    <button id="tErase" title="擦掉笔迹">🩹 橡皮</button>
+    <span class="sep"></span>
+
+    <span id="palette"></span>
+    <span class="sep"></span>
+
+    <span class="sizes" id="sizes"></span>
+    <span class="sep"></span>
+
+    <button id="addRef" class="primary" title="也可以直接 Ctrl/⌘+V 粘贴，或把图片拖进页面">🖼 添加参考图</button>
+    <button id="browse">👁 浏览模式</button>
+    <span class="sep"></span>
+
+    <button id="copyNotes">📋 复制全部备注</button>
+    <button id="clearAll">🧹 清空全部笔迹</button>
+    <button id="syncNow" class="primary" title="立即把标注写入项目目录 board-out/">⬆ 立即同步</button>
+    <span class="grow"></span>
+    <span class="hint" id="syncState">正在准备…</span>
+  </div>
+
+  <div class="layout" id="layoutBar">
+    <span class="lt">全局布局</span>
+    <button id="resetLayout" title="恢复所有布局参数">↺ 重置</button>
+    <span class="note">拖动后所有「界面」卡片同步变化，参考图不受影响</span>
+  </div>
+</div>
+
+<input id="fileRef" type="file" accept="image/*" multiple hidden />
+
+<div id="root" class="grid"></div>
+
+<script>
+/* ============================================================
+   界面评审板
+   - App 界面卡片：iframe 加载真实 App（demo=1 注入示例数据）
+   - 参考图卡片：自行添加图片，可在图上画 + 写备注
+   - 全局布局滑杆：同时改所有界面卡片的屏幕 / 滚轮尺寸与位置
+   - 笔迹 / 备注 / 布局参数存 localStorage；参考图原图存 IndexedDB
+   ============================================================ */
+
+var SCREENS = [
+  { id: 'home',      title: '主页',              url: '/?demo=1&screen=home' },
+  { id: 'quick',     title: '主页 · 快捷面板',    url: '/?demo=1&screen=home&quick=1' },
+  { id: 'queue',     title: '播放列表',           url: '/?demo=1&screen=play-queue' },
+  { id: 'favorites', title: '我喜欢的音乐',       url: '/?demo=1&screen=favorites' },
+  { id: 'favorites0', title: '我喜欢的（未登录）', url: '/?demo=1&screen=favorites&user=0' },
+  { id: 'search',    title: '搜索',              url: '/?demo=1&screen=search' },
+  { id: 'settings',  title: '设置',              url: '/?demo=1&screen=settings' },
+  { id: 'settings0', title: '设置（未登录）',      url: '/?demo=1&screen=settings&user=0' },
+  { id: 'neapi',     title: '网易云 API 地址',    url: '/?demo=1&screen=settings.netease' },
+  { id: 'nelogin',   title: '网易云登录（未登录）', url: '/?demo=1&screen=netease.login&user=0' },
+  { id: 'nepls',     title: '网易云歌单',         url: '/?demo=1&screen=netease.playlists' },
+  { id: 'nepls0',    title: '网易云歌单（未登录）', url: '/?demo=1&screen=netease.playlists&user=0' },
+  { id: 'nepl',      title: '歌单详情',           url: '/?demo=1&screen=netease.playlist' },
+  { id: 'now',       title: '正在播放',           url: '/?demo=1&screen=now-playing' },
+  { id: 'ring',      title: '快捷面板 · 亮度调节', url: '/?demo=1&screen=home&quick=bright' }
+];
+
+var STAGE_W = 460;      /* App 界面舞台宽度：略大于手机外壳，留边距 */
+var STAGE_H = 920;
+var MAX_REF_W = 460;    /* 参考图最大展示宽度 */
+var MAX_REF_H = 1200;   /* 参考图最大展示高度 */
+
+var STORE_KEY = 'ipod-board-v1';        /* { cardId: { strokes:[], note:'' } } */
+var REF_KEY = 'ipod-board-refs-v1';     /* [{ id, name, w, h }] */
+var LAYOUT_KEY = 'ipod-board-layout-v1';/* { '--shell-w': 80, ... } */
+var DB_NAME = 'ipod-board';
+var DB_STORE = 'refImages';
+
+var dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+/* ============================================================
+   全局布局参数（作用于每一张「界面」卡片的 iframe 内）
+   变量含义与 ipod-player/src/styles/globals.css 一致
+   ============================================================ */
+var LAYOUT_VARS = [
+  { k: '--shell-w',      label: '屏幕宽度',      min: 50, max: 100, step: 1,   def: 90,
+    show: function (v) { return v + '%'; },                 css: function (v) { return String(v); } },
+  { k: '--screen-h',     label: '屏幕高度',      min: 0,  max: 860, step: 4,   def: 432,
+    show: function (v) { return v ? v + 'px' : '按比例'; }, css: function (v) { return v > 0 ? v + 'px' : ''; } },
+  { k: '--bezel-radius', label: '屏幕圆角',      min: 0,  max: 26,  step: 0.5, def: 13,
+    show: function (v) { return v + '%'; },                 css: function (v) { return v + '%'; } },
+  { k: '--screen-mt',    label: '屏幕上边距',    min: 0,  max: 200, step: 4,   def: 0,
+    show: function (v) { return v + 'px'; },                css: function (v) { return v + 'px'; } },
+  { k: '--row-font',     label: '列表字号',      min: 12, max: 26,  step: 1,   def: 18,
+    show: function (v) { return v + 'px'; },                css: function (v) { return v + 'px'; } },
+  { k: '--row-h',        label: '列表行高',      min: 32, max: 72,  step: 2,   def: 48,
+    show: function (v) { return v + 'px'; },                css: function (v) { return v + 'px'; } },
+  { k: '--wheel-size',   label: '滚轮大小',      min: 40, max: 100, step: 1,   def: 90,
+    show: function (v) { return v + '%'; },                 css: function (v) { return v + '%'; } },
+  { k: '--screen-gap',   label: '屏幕↔滚轮间距', min: 0,  max: 160, step: 2,   def: 94,
+    show: function (v) { return v + 'px'; },                css: function (v) { return v + 'px'; } },
+  { k: '--wheel-mb',     label: '滚轮下边距',    min: 0,  max: 200, step: 4,   def: 20,
+    show: function (v) { return v + 'px'; },                css: function (v) { return v + 'px'; } }
+];
+
+var layoutValues = (function () {
+  var saved = loadJSON(LAYOUT_KEY, {});
+  var out = {};
+  LAYOUT_VARS.forEach(function (spec) {
+    out[spec.k] = (typeof saved[spec.k] === 'number') ? saved[spec.k] : spec.def;
+  });
+  return out;
+})();
+
+/* ---------------- 通用小工具 ---------------- */
+function loadJSON(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch (e) { return fallback; }
+}
+var saveTimer = null;
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(function () {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(store));
+      localStorage.setItem(REF_KEY, JSON.stringify(refMeta));
+    } catch (e) { console.warn('localStorage 写入失败（可能超出配额）', e); }
+    scheduleSync();
+  }, 250);
+}
+function saveLayout() {
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layoutValues)); } catch (e) {}
+}
+
+/* ---------------- 状态 ---------------- */
+var store = loadJSON(STORE_KEY, {});
+var refMeta = loadJSON(REF_KEY, []);
+var canvases = {};   /* cardId -> canvas */
+var flags = {};      /* cardId -> 角标元素 */
+var badges = {};     /* cardId -> 序号元素 */
+var imgUrls = {};    /* cardId -> objectURL，删除时释放 */
+
+function ensure(id) {
+  if (!store[id]) store[id] = { strokes: [], note: '' };
+  if (!store[id].strokes) store[id].strokes = [];
+  return store[id];
+}
+function uid() { return 'ref-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7); }
+
+/* ============================================================
+   布局滑杆
+   ============================================================ */
+var layoutBar = document.getElementById('layoutBar');
+
+LAYOUT_VARS.forEach(function (spec) {
+  var label = document.createElement('label');
+
+  var text = document.createElement('span');
+  text.textContent = spec.label;
+
+  var input = document.createElement('input');
+  input.type = 'range';
+  input.min = spec.min; input.max = spec.max; input.step = spec.step;
+  input.value = layoutValues[spec.k];
+
+  var out = document.createElement('b');
+  out.textContent = spec.show(layoutValues[spec.k]);
+
+  input.addEventListener('input', function () {
+    layoutValues[spec.k] = Number(input.value);
+    out.textContent = spec.show(layoutValues[spec.k]);
+    saveLayout();
+    applyLayoutAll();
+    scheduleSync();
+  });
+
+  label.append(text, input, out);
+  label.dataset.var = spec.k;
+  layoutBar.appendChild(label);
+});
+
+function appFrames() {
+  return [].slice.call(document.querySelectorAll('.stage iframe'));
+}
+
+/** 把当前布局参数写进某个 iframe 里（同源，可直接改它的 :root 行内样式） */
+function applyLayoutToFrame(frame) {
+  var doc;
+  try { doc = frame.contentDocument; } catch (e) { return; }
+  if (!doc || !doc.documentElement) return;
+  var st = doc.documentElement.style;
+  /* 放开宽度上限，否则宽度滑杆在桌面浏览器里没效果 */
+  st.setProperty('--shell-max', '9999px');
+  LAYOUT_VARS.forEach(function (spec) {
+    var css = spec.css(layoutValues[spec.k]);
+    if (css === '') st.removeProperty(spec.k);
+    else st.setProperty(spec.k, css);
+  });
+}
+
+function applyLayoutAll() {
+  appFrames().forEach(applyLayoutToFrame);
+}
+
+document.getElementById('resetLayout').onclick = function () {
+  LAYOUT_VARS.forEach(function (spec) {
+    layoutValues[spec.k] = spec.def;
+    var label = layoutBar.querySelector('[data-var="' + spec.k + '"]');
+    if (!label) return;
+    label.querySelector('input').value = spec.def;
+    label.querySelector('b').textContent = spec.show(spec.def);
+  });
+  saveLayout();
+  applyLayoutAll();
+};
+
+/** 与默认值不同的布局项，用于「复制全部备注」 */
+function layoutDiff() {
+  var out = [];
+  LAYOUT_VARS.forEach(function (spec) {
+    var v = layoutValues[spec.k];
+    if (v !== spec.def) out.push(spec.label + '：' + spec.show(v));
+  });
+  return out;
+}
+
+/* ---------------- 顶栏：颜色 / 粗细 ---------------- */
+var COLORS = ['#ff3b30', '#ff9500', '#34c759', '#007aff', '#af52de', '#111111'];
+var palette = document.getElementById('palette');
+var ink = { color: COLORS[0], size: 3, erase: false };
+
+COLORS.forEach(function (c) {
+  var b = document.createElement('button');
+  b.className = 'swatch' + (c === ink.color ? ' on' : '');
+  b.style.background = c;
+  b.title = c;
+  b.onclick = function () {
+    ink.color = c; ink.erase = false;
+    document.getElementById('tPen').classList.add('on');
+    document.getElementById('tErase').classList.remove('on');
+    syncSwatch();
+  };
+  palette.appendChild(b);
+});
+function syncSwatch() {
+  [].forEach.call(palette.children, function (el) {
+    el.classList.toggle('on', el.title === ink.color && !ink.erase);
+  });
+}
+
+var sizesBox = document.getElementById('sizes');
+[2, 4, 8].forEach(function (s) {
+  var b = document.createElement('button');
+  b.className = s === ink.size ? 'on' : '';
+  b.title = s + 'px';
+  var d = document.createElement('span');
+  d.className = 'dot';
+  d.style.width = s + 'px'; d.style.height = s + 'px';
+  b.appendChild(d);
+  b.onclick = function () {
+    ink.size = s;
+    [].forEach.call(sizesBox.children, function (el) { el.classList.remove('on'); });
+    b.classList.add('on');
+  };
+  sizesBox.appendChild(b);
+});
+
+document.getElementById('tPen').onclick = function () {
+  ink.erase = false; this.classList.add('on');
+  document.getElementById('tErase').classList.remove('on');
+  syncSwatch();
+};
+document.getElementById('tErase').onclick = function () {
+  ink.erase = true; this.classList.add('on');
+  document.getElementById('tPen').classList.remove('on');
+  syncSwatch();
+};
+
+var browseBtn = document.getElementById('browse');
+browseBtn.onclick = function () {
+  var on = document.body.classList.toggle('browse');
+  browseBtn.classList.toggle('on', on);
+  browseBtn.textContent = on ? '✏️ 绘画模式' : '👁 浏览模式';
+};
+
+/* ---------------- 卡片骨架 ---------------- */
+var grid = document.getElementById('root');
+
+function buildCard(opts) {
+  var card = document.createElement('section');
+  card.className = 'card' + (opts.isRef ? ' ref' : '');
+
+  var head = document.createElement('header');
+  var no = document.createElement('span'); no.className = 'no';
+  var name = document.createElement('span'); name.className = 'name'; name.textContent = opts.title;
+  var flag = document.createElement('span'); flag.className = 'flag'; flag.style.display = 'none'; flag.textContent = '已备注';
+  var grow = document.createElement('span'); grow.className = 'grow';
+
+  var undo = document.createElement('button'); undo.textContent = '撤销';
+  undo.onclick = function () { var s = ensure(opts.id); s.strokes.pop(); redraw(opts.id); save(); refreshFlag(opts.id); };
+  var clear = document.createElement('button'); clear.textContent = '清空';
+  clear.onclick = function () { ensure(opts.id).strokes = []; redraw(opts.id); save(); refreshFlag(opts.id); };
+  head.append(no, name, flag, grow, undo, clear);
+
+  if (opts.onDelete) {
+    var del = document.createElement('button'); del.textContent = '删除';
+    del.title = '移除这张参考图';
+    del.onclick = function () {
+      if (!confirm('删除这张参考图？')) return;
+      opts.onDelete();
+    };
+    head.appendChild(del);
+  }
+
+  var stage = document.createElement('div');
+  stage.className = 'stage';
+  stage.style.width = opts.w + 'px';
+  stage.style.height = opts.h + 'px';
+  if (opts.node) stage.appendChild(opts.node);
+
+  var canvas = document.createElement('canvas');
+  canvas.className = 'ink';
+  canvas.width = opts.w * dpr;
+  canvas.height = opts.h * dpr;
+  canvas.style.width = opts.w + 'px';
+  canvas.style.height = opts.h + 'px';
+  canvas.__dpr = dpr;
+  stage.appendChild(canvas);
+
+  var note = document.createElement('textarea');
+  note.className = 'note';
+  note.placeholder = opts.placeholder;
+  note.value = ensure(opts.id).note || '';
+  note.addEventListener('input', function () {
+    ensure(opts.id).note = note.value;
+    save();
+    refreshFlag(opts.id);
+  });
+
+  card.append(head, stage, note);
+  grid.appendChild(card);
+
+  canvases[opts.id] = canvas;
+  flags[opts.id] = flag;
+  badges[opts.id] = no;
+  bindDraw(opts.id, canvas);
+  redraw(opts.id);
+  refreshFlag(opts.id);
+  renumber();
+  return card;
+}
+
+function refreshFlag(id) {
+  var s = store[id] || { strokes: [], note: '' };
+  var has = (s.strokes && s.strokes.length > 0) || (s.note && s.note.trim());
+  if (flags[id]) flags[id].style.display = has ? '' : 'none';
+}
+
+/** 重新编号，保证增删后序号连续 */
+function renumber() {
+  [].forEach.call(grid.children, function (card, i) {
+    var b = card.querySelector('header .no');
+    if (!b) return;
+    if (card.classList.contains('ref')) b.textContent = '图' + (i + 1 - SCREENS.length);
+    else b.textContent = String(i + 1);
+  });
+}
+
+/* ---------------- App 界面卡片 ---------------- */
+SCREENS.forEach(function (spec) {
+  var frame = document.createElement('iframe');
+  frame.loading = 'lazy';
+  frame.title = spec.title;
+  /* App 启动完成后把当前布局参数写进去 */
+  frame.addEventListener('load', function () { applyLayoutToFrame(frame); });
+  frame.src = spec.url;
+
+  buildCard({
+    id: spec.id,
+    title: spec.title,
+    w: STAGE_W,
+    h: STAGE_H,
+    node: frame,
+    placeholder: '写这里：这一屏你想怎么排版、哪里别扭、想加/想去掉什么…'
+  });
+});
+
+/* ---------------- IndexedDB：保存参考图原图 ---------------- */
+var dbPromise = null;
+function openDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise(function (resolve, reject) {
+    if (!window.indexedDB) return reject(new Error('no indexedDB'));
+    var req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = function () {
+      var db = req.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE, { keyPath: 'id' });
+    };
+    req.onsuccess = function () { resolve(req.result); };
+    req.onerror = function () { reject(req.error); };
+  });
+  return dbPromise;
+}
+function idbPut(rec) {
+  return openDB().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      var tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).put(rec);
+      tx.oncomplete = resolve;
+      tx.onerror = function () { reject(tx.error); };
+    });
+  });
+}
+function idbGetAll() {
+  return openDB().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      var tx = db.transaction(DB_STORE, 'readonly');
+      var req = tx.objectStore(DB_STORE).getAll();
+      req.onsuccess = function () { resolve(req.result || []); };
+      req.onerror = function () { reject(req.error); };
+    });
+  });
+}
+function idbDelete(id) {
+  return openDB().then(function (db) {
+    return new Promise(function (resolve) {
+      var tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).delete(id);
+      tx.oncomplete = resolve;
+      tx.onerror = resolve;
+    });
+  });
+}
+
+/* ---------------- 参考图卡片 ---------------- */
+document.getElementById('addRef').onclick = function () {
+  document.getElementById('fileRef').click();
+};
+
+document.getElementById('fileRef').onchange = function (e) {
+  var files = [].slice.call(e.target.files || []);
+  e.target.value = '';
+  importImages(files);
+};
+
+/* 粘贴图片：Ctrl / ⌘ + V */
+document.addEventListener('paste', function (e) {
+  var items = (e.clipboardData && e.clipboardData.items) || [];
+  var files = [];
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].type && items[i].type.indexOf('image') === 0) {
+      var f = items[i].getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  if (files.length) { e.preventDefault(); importImages(files); }
+});
+
+/* 拖入图片 */
+var dragDepth = 0;
+document.addEventListener('dragenter', function (e) {
+  if (!hasFiles(e)) return;
+  dragDepth++;
+  document.body.classList.add('dragging');
+});
+document.addEventListener('dragover', function (e) { if (hasFiles(e)) e.preventDefault(); });
+document.addEventListener('dragleave', function () {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) document.body.classList.remove('dragging');
+});
+document.addEventListener('drop', function (e) {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('dragging');
+  var files = [].slice.call(e.dataTransfer.files || []).filter(function (f) {
+    return f.type.indexOf('image') === 0;
+  });
+  importImages(files);
+});
+function hasFiles(e) {
+  var t = e.dataTransfer;
+  if (!t || !t.types) return false;
+  return [].indexOf.call(t.types, 'Files') >= 0;
+}
+
+/** 逐张读入图片：算出展示尺寸 → 存 IndexedDB → 建卡片 */
+function importImages(files) {
+  if (!files || !files.length) return;
+  files.forEach(function (file) {
+    if (file.type.indexOf('image') !== 0) return;
+    var id = uid();
+    var name = file.name || '粘贴的图片';
+
+    loadImageSize(file).then(function (size) {
+      var w = Math.min(MAX_REF_W, size.w);
+      var h = Math.round(w * size.h / size.w);
+      if (h > MAX_REF_H) { h = MAX_REF_H; w = Math.round(h * size.w / size.h); }
+
+      var rec = { id: id, name: name, w: w, h: h, blob: file };
+      refMeta.push({ id: id, name: name, w: w, h: h });
+      save(); // 立即落盘，避免刷新后参考图元数据丢失
+
+      return idbPut(rec).catch(function (err) {
+        console.warn('IndexedDB 保存失败，本次仍可查看但不持久', err);
+      }).then(function () {
+        mountRefCard({ id: id, name: name, w: w, h: h }, file);
+      });
+    }).catch(function (err) {
+      console.error('读取图片失败', err);
+      alert('这张图片读不出来：' + name);
+    });
+  });
+}
+
+function loadImageSize(file) {
+  return new Promise(function (resolve, reject) {
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function () {
+      var size = { w: img.naturalWidth || 300, h: img.naturalHeight || 300 };
+      URL.revokeObjectURL(url);
+      resolve(size);
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('decode failed')); };
+    img.src = url;
+  });
+}
+
+function mountRefCard(meta, blob) {
+  var url = URL.createObjectURL(blob);
+  imgUrls[meta.id] = url;
+
+  var img = document.createElement('img');
+  img.className = 'ref-img';
+  img.src = url;
+  img.alt = meta.name;
+
+  buildCard({
+    id: meta.id,
+    title: meta.name,
+    w: meta.w,
+    h: meta.h,
+    node: img,
+    isRef: true,
+    placeholder: '写这里：这张参考图里你想要的是哪部分？照它改哪里？',
+    onDelete: function () {
+      var card = img.closest('.card');
+      if (card) card.remove();
+      if (imgUrls[meta.id]) { URL.revokeObjectURL(imgUrls[meta.id]); delete imgUrls[meta.id]; }
+      delete canvases[meta.id];
+      delete flags[meta.id];
+      delete badges[meta.id];
+      delete store[meta.id];
+      refMeta = refMeta.filter(function (r) { return r.id !== meta.id; });
+      idbDelete(meta.id);
+      save();
+      renumber();
+    }
+  });
+}
+
+/** 刷新后恢复已保存的参考图 */
+function restoreRefs() {
+  if (!refMeta.length) return;
+  idbGetAll().then(function (recs) {
+    var byId = {};
+    recs.forEach(function (r) { byId[r.id] = r; });
+    var missing = [];
+    refMeta.forEach(function (meta) {
+      var rec = byId[meta.id];
+      if (rec && rec.blob) mountRefCard(meta, rec.blob);
+      else missing.push(meta.id);
+    });
+    if (missing.length) {
+      refMeta = refMeta.filter(function (r) { return missing.indexOf(r.id) < 0; });
+      save();
+      var w = document.createElement('div');
+      w.className = 'empty-ref';
+      w.textContent = '有 ' + missing.length + ' 张参考图的原图已丢失（可能是换浏览器或清了站点数据），已自动移除。';
+      grid.parentNode.insertBefore(w, grid);
+    }
+  }).catch(function (err) {
+    console.warn('读取参考图失败', err);
+  });
+}
+
+/* ---------------- 绘画 ---------------- */
+function bindDraw(id, canvas) {
+  var cur = null;
+
+  function pos(e) {
+    var r = canvas.getBoundingClientRect();
+    return { x: Math.round((e.clientX - r.left) * 10) / 10, y: Math.round((e.clientY - r.top) * 10) / 10 };
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    if (document.body.classList.contains('browse')) return;
+    e.preventDefault();
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* 某些环境不支持，忽略 */ }
+    cur = { color: ink.color, size: ink.size, erase: ink.erase, points: [pos(e)] };
+    ensure(id).strokes.push(cur);
+    redraw(id);
+  });
+
+  canvas.addEventListener('pointermove', function (e) {
+    if (!cur) return;
+    e.preventDefault();
+    cur.points.push(pos(e));
+    redraw(id);
+  });
+
+  function finish() {
+    if (!cur) return;
+    cur = null;
+    save();
+    refreshFlag(id);
+  }
+  canvas.addEventListener('pointerup', finish);
+  canvas.addEventListener('pointercancel', finish);
+  canvas.addEventListener('pointerleave', finish);
+}
+
+function redraw(id) {
+  var canvas = canvases[id];
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var d = canvas.__dpr || 1;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  var strokes = (store[id] && store[id].strokes) || [];
+  strokes.forEach(function (s) {
+    ctx.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
+    ctx.strokeStyle = s.color;
+    ctx.fillStyle = s.color;
+    ctx.lineWidth = s.size;
+    if (s.points.length < 2) {
+      var p = s.points[0];
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, s.size / 2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    ctx.beginPath();
+    s.points.forEach(function (p, i) {
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.stroke();
+  });
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/* ---------------- 批量操作 ---------------- */
+document.getElementById('clearAll').onclick = function () {
+  if (!confirm('清空所有卡片上的笔迹？（参考图和文字备注会保留）')) return;
+  Object.keys(store).forEach(function (id) {
+    store[id].strokes = [];
+    redraw(id);
+    refreshFlag(id);
+  });
+  save();
+};
+
+document.getElementById('copyNotes').onclick = function () {
+  var out = ['【界面评审板 · 备注汇总】'];
+
+  var diff = layoutDiff();
+  if (diff.length) {
+    out.push('');
+    out.push('◆ 全局布局（已改动，请按这个来）');
+    diff.forEach(function (line) { out.push('- ' + line); });
+  }
+
+  var any = diff.length > 0;
+  var appNo = 0;
+
+  SCREENS.forEach(function (spec) {
+    appNo++;
+    var s = store[spec.id] || {};
+    var note = (s.note || '').trim();
+    var drew = (s.strokes || []).length > 0;
+    if (!note && !drew) return;
+    any = true;
+    out.push('');
+    out.push(appNo + '. 【界面】' + spec.title + (drew ? '（上面有笔迹）' : ''));
+    if (note) out.push(note);
+  });
+
+  var refNo = 0;
+  refMeta.forEach(function (meta) {
+    refNo++;
+    var s = store[meta.id] || {};
+    var note = (s.note || '').trim();
+    var drew = (s.strokes || []).length > 0;
+    if (!note && !drew) return;
+    any = true;
+    out.push('');
+    out.push('R' + refNo + '. 【参考图】' + meta.name + (drew ? '（上面有笔迹）' : ''));
+    if (note) out.push(note);
+  });
+
+  if (!any) { alert('还没有任何备注。'); return; }
+  var text = out.join('\n');
+  copy(text).then(function () { alert('已复制到剪贴板，粘贴给我即可。'); },
+                  function () { window.prompt('复制下面的内容：', text); });
+};
+
+function copy(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise(function (resolve, reject) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      resolve();
+    } catch (e) { reject(e); }
+  });
+}
+
+/* ---------------- 环境提示 ---------------- */
+if (location.protocol === 'file:') {
+  var w = document.createElement('div');
+  w.className = 'warn';
+  w.textContent = '请通过开发服务器打开本页（http://localhost:5173/board.html），直接双击文件打开时 iframe 无法加载 App。';
+  document.body.insertBefore(w, grid);
+}
+
+/* ============================================================
+   自动同步：把标注写到项目目录 board-out/
+   评审板的标注只存在浏览器本地，落盘后工程侧才能真正读到
+   ============================================================ */
+var syncStateEl = document.getElementById('syncState');
+var syncTimer = null;
+var lastRefSig = null;
+
+function setSync(text, ok) {
+  if (!syncStateEl) return;
+  syncStateEl.textContent = text;
+  syncStateEl.style.color = ok === false ? '#ff7b72' : (ok ? '#5eead4' : '');
+}
+
+function scheduleSync() {
+  setSync('待同步…');
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(function () { syncNow(); }, 1500);
+}
+
+function blobToDataUrl(blob) {
+  return new Promise(function (resolve, reject) {
+    var fr = new FileReader();
+    fr.onload = function () { resolve(String(fr.result)); };
+    fr.onerror = function () { reject(fr.error); };
+    fr.readAsDataURL(blob);
+  });
+}
+
+/** 汇总当前全部标注（布局 + 每张卡片的笔迹与备注 + 参考图原图） */
+function collectAll() {
+  var payload = {
+    exportedAt: new Date().toISOString(),
+    layout: JSON.parse(JSON.stringify(layoutValues)),
+    layoutDiff: layoutDiff(),
+    cards: [],
+    refs: []
+  };
+
+  SCREENS.forEach(function (spec, i) {
+    var s = store[spec.id] || {};
+    payload.cards.push({
+      kind: 'screen', no: i + 1, id: spec.id, title: spec.title,
+      note: (s.note || '').trim(), strokes: s.strokes || []
+    });
+  });
+
+  refMeta.forEach(function (meta, i) {
+    var s = store[meta.id] || {};
+    payload.cards.push({
+      kind: 'ref', no: 'R' + (i + 1), id: meta.id, title: meta.name,
+      w: meta.w, h: meta.h,
+      note: (s.note || '').trim(), strokes: s.strokes || []
+    });
+  });
+
+  /* 参考图原图较大，只在图片集合有变化时上传 */
+  var sig = refMeta.map(function (r) { return r.id; }).join(',');
+  if (sig === lastRefSig) return Promise.resolve(payload);
+  lastRefSig = sig;
+
+  return idbGetAll().then(function (recs) {
+    return Promise.all(recs.map(function (r) {
+      return blobToDataUrl(r.blob).then(function (d) {
+        payload.refs.push({ id: r.id, name: r.name, w: r.w, h: r.h, dataUrl: d });
+      }).catch(function () {});
+    }));
+  }).then(function () { return payload; });
+}
+
+function syncNow() {
+  clearTimeout(syncTimer);
+  setSync('同步中…');
+  return collectAll().then(function (payload) {
+    return fetch('/__board/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  }).then(function (res) {
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  }).then(function (res) {
+    setSync(
+      '已同步 ' + new Date().toLocaleTimeString() +
+      (res.refs ? '（含 ' + res.refs + ' 张参考图）' : ''),
+      true
+    );
+  }).catch(function (err) {
+    setSync('同步失败：' + err.message + '（需通过开发服务器打开）', false);
+  });
+}
+
+document.getElementById('syncNow').onclick = function () { syncNow(); };
+
+/* ---------------- 启动 ---------------- */
+restoreRefs();
+/* 打开后自动同步一次：这样你「刷新一下」就能把已有标注传出去 */
+setTimeout(syncNow, 900);
+</script>
+
+</body>
+</html>

@@ -46,3 +46,9 @@ yarn-error.log*
 # bundles
 *.tar.gz
 *.zip
+
+# iOS 打包产物（由 GitHub Actions 生成，不入库）
+*.ipa
+
+# board annotation sync output (dev only)
+board-out/

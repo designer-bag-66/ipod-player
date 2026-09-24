@@ -2,6 +2,10 @@
   "compilerOptions": {
     "composite": true,
     "skipLibCheck": true,
+    // Node 20 环境：不指定 target 会回落到 ES3，导致 vite.config.ts 里的
+    // `/s` 正则标志报 TS1501（该语法无法降级），构建直接失败
+    "target": "ES2022",
+    "lib": ["ES2022"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,

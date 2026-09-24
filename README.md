@@ -1,6 +1,6 @@
 # iPodPlayer
 
-> 仿 iPod Click Wheel 的本地音乐播放器，Web + Capacitor + iPhone 自用版。
+> 仿 iPod Click Wheel 的音乐播放器（曲库走网易云在线），Web + Capacitor + iPhone 自用版。
 > 实现细节按 [`iPod-Click-Wheel-iPhone原生版开发文档.docx`](../../) 第 2-7 节、第 10 节「自用部署方案（路线 B）」。
 
 ---
@@ -31,12 +31,12 @@ ipod-player/
 ├── src/
 │   ├── components/
 │   │   ├── shell/        # IPodShell / Screen / ClickWheel
-│   │   ├── views/        # Home / Music / NowPlaying / Search / Settings
-│   │   └── ui/           # ListMenu / AlbumCover / ProgressBar
-│   ├── stores/           # zustand: library / player / navigation
-│   ├── services/         # storage (IndexedDB) / metadata (ID3)
+│   │   ├── views/        # Home / SongList / PlayQueue / NowPlaying / Search / Settings / Netease
+│   │   └── ui/           # ListMenu / ProgressBar
+│   ├── stores/           # zustand: player / navigation / auth / prefs / design
+│   ├── services/         # storage (IndexedDB 键值) / netease (在线曲库)
 │   ├── styles/globals.css# Tailwind v4 + iPod 视觉
-│   ├── types/            # Track / Playlist / PlayerState / Screen
+│   ├── types/            # Track / PlayerState / Screen
 │   ├── utils/angle.ts    # 文档 4.3 手势算法
 │   ├── main.tsx          # App + 路由 + Click Wheel 事件分发
 │   └── capacitor.ts      # Capacitor iOS 引导
@@ -49,7 +49,7 @@ ipod-player/
 | 里程碑 | 文档要求 | 本仓库实现位置 |
 |--------|---------|--------------|
 | **M1 界面骨架** | SwiftUI 主页、圆盘、菜单、基本动画 | `src/components/shell/*` + `src/components/views/*` |
-| **M2 本地曲库** | 文件导入、元数据、封面、持久化 | `src/services/metadata.ts` + `src/services/storage.ts` + `src/stores/library.ts` |
+| ~~**M2 本地曲库**~~ | 已移除，改为网易云在线曲库 | `src/services/netease.ts` + `src/components/views/NeteaseView.tsx` |
 | **M3 真正播放** | AVPlayer / HTMLAudioElement、队列、进度、模式 | `src/stores/player.ts` |
 | **M4 系统集成** | 后台音频、锁屏信息、耳机控制 | Web 端 `MediaSession API`；iOS 端需要补 Info.plist 的 `UIBackgroundModes: [audio]` |
 | **M5 自用安装** | 真机签名 / 侧载 | 文档 10.6 + 10.7（GitHub Actions + SideStore） |
@@ -98,7 +98,7 @@ npx cap sync ios
 
 ## 7. iOS 后台播放补丁（文档 10.9）
 
-GitHub Actions 生成工程后，需要在 `ios/App/App/Info.plist` 加入：
+后台播放需要 `ios/App/App/Info.plist` 里有：
 
 ```xml
 <key>UIBackgroundModes</key>
@@ -107,15 +107,19 @@ GitHub Actions 生成工程后，需要在 `ios/App/App/Info.plist` 加入：
 </array>
 ```
 
+因为 `ios/` 在 `.gitignore` 里、每次 CI 都重新生成工程，所以**这个键由
+`.github/workflows/ios-build.yml` 的 `Patch Info.plist (background audio)`
+步骤用 PlistBuddy 自动注入**，不需要手动改。
+
 加入后 WKWebView 的 `<audio>` 在锁屏、来电插队后会自动继续。
 
 ## 9. 验收清单（文档 6 节，对应到 Web/移动）
 
 - 圆盘顺时针/逆时针连续 20 次：列表高亮逐项变化。
 - 中央键 / MENU / 上一首 / 下一首 / 播放暂停：均能触发，无误触。
-- 导入 ≥10 首不同元数据：曲库列表完整，缺失封面显示首字符占位。
+- 搜索网易云关键词：结果可播放，整份结果即播放队列。
 - 拖动进度条：播放器 seek 同步。
-- 退出重开：IndexedDB 中的曲库、喜欢、设置全部保留。
+- 退出重开：登录态与设置（循环模式 / 音量等）保留。
 - iOS 真机：锁屏 → 控件显示当前曲目；来电话 → 自动暂停；挂断 → 自动恢复。
 
 ## 10. 已知限制

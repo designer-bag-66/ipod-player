@@ -20,7 +20,15 @@ export function IPodShell({ children, wheel, transitioning }: Props) {
       <div className="w-full flex flex-col items-center flex-1 min-h-0">
         {children}
       </div>
-      <div className="w-[90%] shrink-0">{wheel}</div>
+      <div
+        className="shrink-0"
+        style={{
+          width: 'min(var(--wheel-size, 90%), calc(var(--wheel-max, 46) * 1vh))',
+          marginBottom: 'var(--wheel-mb, 0px)',
+        }}
+      >
+        {wheel}
+      </div>
     </div>
   );
 }

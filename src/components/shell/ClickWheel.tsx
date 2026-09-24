@@ -11,8 +11,8 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { angleFromCenter, createAccumulator, feedWheel, normalizeAngle } from '@/utils/angle';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { Capacitor } from '@capacitor/core';
+import { haptic } from '@/services/haptic';
+import { playTick, unlockSound } from '@/services/sound';
 
 interface Props {
   onSelect: () => void;
@@ -21,27 +21,19 @@ interface Props {
   onNext: () => void;
   onPlayPause: () => void;
   onWheel: (delta: number) => void;
+  /** 长按中央确认键（600ms）触发 */
+  onLongPress?: () => void;
   isPlaying?: boolean;
   disabled?: boolean;
 }
 
 const STEP_DEG = 20; // 文档 4.3：18~22° 推荐 20°
 const CENTER_RATIO = 0.42;
-const OUTER_PAD_RATIO = 0.94;
+const OUTER_PAD_RATIO = 1; // 整个圆盘区域都响应（修复边缘播放/暂停键失效）
 const TAP_ANGLE_HALF = Math.PI / 6; // 每个按键占 60° 扇形
-const SWIPE_ANGLE_THRESHOLD = 0.12; // 约 7° 视为滑动
-
-async function haptic() {
-  if (!Capacitor.isNativePlatform()) {
-    if ('vibrate' in navigator) navigator.vibrate(8);
-    return;
-  }
-  try {
-    await Haptics.impact({ style: ImpactStyle.Light });
-  } catch {
-    /* ignore */
-  }
-}
+const SWIPE_ANGLE_THRESHOLD = 0.35; // 约 20° 视为滑动，提高切歌按键命中率
+const LONG_PRESS_MS = 600;
+const LONG_PRESS_MOVE_PX = 14;
 
 /** 根据角度判断落在四向按键的哪个象限（0 点在 12 点钟方向，顺时针为正） */
 function buttonAtAngle(angle: number): 'menu' | 'prev' | 'next' | 'play' | null {
@@ -60,6 +52,7 @@ export function ClickWheel({
   onNext,
   onPlayPause,
   onWheel,
+  onLongPress,
   isPlaying,
   disabled,
 }: Props) {
@@ -70,6 +63,18 @@ export function ClickWheel({
   const touchingRef = useRef(false);
   const startTargetRef = useRef<'center' | 'ring' | null>(null);
   const movedRef = useRef(false);
+  const downTimeRef = useRef(0);
+  const stepCountRef = useRef(0);
+  const startPosRef = useRef<{ x: number; y: number } | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longFiredRef = useRef(false);
+
+  const clearLongPress = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
 
   const [pressed, setPressed] = useState<'wheel' | 'center' | 'menu' | 'prev' | 'next' | 'play' | null>(null);
 
@@ -88,6 +93,8 @@ export function ClickWheel({
 
     function onPointerDown(e: PointerEvent) {
       if (disabled) return;
+      // 首次手势里解锁 WebAudio，之后才听得到选择音效
+      unlockSound();
       const { cx, cy, radius } = getCenter();
       const dx = e.clientX - cx;
       const dy = e.clientY - cy;
@@ -96,16 +103,30 @@ export function ClickWheel({
 
       movedRef.current = false;
       startAngleRef.current = null;
+      downTimeRef.current = Date.now();
+      stepCountRef.current = 0;
+      startPosRef.current = { x: e.clientX, y: e.clientY };
+      longFiredRef.current = false;
+      clearLongPress();
 
       // 中央确认键
       if (dist < innerRadius) {
         startTargetRef.current = 'center';
         setPressed('center');
+        // 长按进入播放界面
+        if (onLongPress) {
+          longPressTimerRef.current = window.setTimeout(() => {
+            longFiredRef.current = true;
+            setPressed(null);
+            onLongPress();
+            haptic();
+          }, LONG_PRESS_MS);
+        }
         e.preventDefault();
         return;
       }
 
-      // 红色圆环区（内缩 6% 避免边缘误触）
+      // 红色圆环区（整个圆盘）
       if (dist < radius * OUTER_PAD_RATIO) {
         touchingRef.current = true;
         const angle = angleFromCenter(e.clientX, e.clientY, cx, cy);
@@ -123,8 +144,14 @@ export function ClickWheel({
 
       const { cx, cy } = getCenter();
 
-      // 中央键不支持拖动，轻微移动仍视为点击
-      if (startTargetRef.current === 'center') return;
+      // 中央键：移动超过阈值取消长按
+      if (startTargetRef.current === 'center') {
+        const sp = startPosRef.current;
+        if (sp && Math.hypot(e.clientX - sp.x, e.clientY - sp.y) > LONG_PRESS_MOVE_PX) {
+          clearLongPress();
+        }
+        return;
+      }
 
       if (touchingRef.current && prevAngleRef.current !== null) {
         const cur = angleFromCenter(e.clientX, e.clientY, cx, cy);
@@ -136,7 +163,9 @@ export function ClickWheel({
         if (steps !== 0) {
           onWheel(steps);
           haptic();
+          playTick('scroll');
           movedRef.current = true;
+          stepCountRef.current += Math.abs(steps);
         }
 
         // 从起始角度移动超过阈值也判定为滑动，抬起时不触发按键
@@ -152,15 +181,27 @@ export function ClickWheel({
 
     function onPointerUp(e: PointerEvent) {
       if (!startTargetRef.current) return;
+      clearLongPress();
 
-      // 点击（未触发滑动）才执行按键动作
-      if (!movedRef.current) {
+      // 快速轻点判定：即使手指有轻微抖动（触发了 1 步滚轮），仍视为按键
+      const duration = Date.now() - downTimeRef.current;
+      const isTap =
+        stepCountRef.current === 0 ||
+        (duration < 350 && stepCountRef.current <= 1);
+
+      if (isTap) {
         if (startTargetRef.current === 'center') {
-          onSelect();
-          haptic();
+          if (!longFiredRef.current) {
+            onSelect();
+            haptic();
+            playTick('select');
+          }
         } else if (startTargetRef.current === 'ring') {
-          const { cx, cy } = getCenter();
-          const angle = angleFromCenter(e.clientX, e.clientY, cx, cy);
+          // 用按下时的角度判断按键，避免抬起时手指滑出扇形区导致失效
+          const angle = startAngleRef.current ?? (() => {
+            const { cx, cy } = getCenter();
+            return angleFromCenter(e.clientX, e.clientY, cx, cy);
+          })();
           const btn = buttonAtAngle(angle);
           if (btn) {
             setPressed(btn);
@@ -179,15 +220,18 @@ export function ClickWheel({
                 break;
             }
             haptic();
+            playTick(btn === 'menu' ? 'back' : 'select');
           }
         }
       }
 
+      e.preventDefault();
       touchingRef.current = false;
       prevAngleRef.current = null;
       startAngleRef.current = null;
       startTargetRef.current = null;
       movedRef.current = false;
+      startPosRef.current = null;
       // 短暂保留按下视觉后清除
       setTimeout(resetPress, 90);
     }
@@ -204,7 +248,7 @@ export function ClickWheel({
       el.removeEventListener('pointercancel', onPointerUp);
       el.removeEventListener('pointerleave', onPointerUp);
     };
-  }, [disabled, onMenu, onNext, onPlayPause, onPrev, onSelect, onWheel, resetPress]);
+  }, [disabled, onMenu, onNext, onPlayPause, onPrev, onSelect, onWheel, onLongPress, resetPress, clearLongPress]);
 
   return (
     <div className="relative w-full select-none">

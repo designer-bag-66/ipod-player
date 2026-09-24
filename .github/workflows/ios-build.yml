@@ -27,6 +27,21 @@ jobs:
             npx cap add ios
           fi
 
+      # 后台播放：ios/ 是 .gitignore 的，每次 CI 都重新生成，
+      # 所以 Info.plist 的补丁必须在这里注入 —— 否则 App 一切到后台就停歌。
+      # 对应 README「iOS 后台播放补丁」，以前靠手动改，CI 里从未生效过。
+      - name: Patch Info.plist (background audio)
+        run: |
+          PLIST=ios/App/App/Info.plist
+          if ! /usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$PLIST" >/dev/null 2>&1; then
+            /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST"
+          fi
+          if ! /usr/libexec/PlistBuddy -c "Print :UIBackgroundModes:0" "$PLIST" >/dev/null 2>&1; then
+            /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PLIST"
+          fi
+          echo "=== UIBackgroundModes ==="
+          /usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$PLIST"
+
       - name: Sync web -> iOS
         run: npx cap sync ios
 
