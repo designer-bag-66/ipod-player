@@ -30,6 +30,7 @@ import { AlbumsView } from '@/components/views/AlbumsView';
 import { NowPlayingView } from '@/components/views/NowPlayingView';
 import { SearchView, playSearchResult } from '@/components/views/SearchView';
 import { SettingsView, settingsAction } from '@/components/views/SettingsView';
+import { NeteaseApiView, neteaseApiAction } from '@/components/views/NeteaseApiView';
 import {
   NeteaseLoginView,
   NeteasePlaylistsView,
@@ -39,6 +40,7 @@ import {
   playNeteaseSongAt,
 } from '@/components/views/NeteaseView';
 import { useAuth } from '@/stores/auth';
+import { usePrefs } from '@/stores/prefs';
 
 const NAV_ANIM_MS = 280;
 /** 原生容器：亮度/音量直接改系统值，Web 端用 CSS 滤镜 + audio.volume 兜底 */
@@ -79,6 +81,7 @@ export function App() {
   const volume = usePlayer((s) => s.volume);
 
   useEffect(() => {
+    usePrefs.getState().init(); // 先恢复首选项（主页布局 / 音效 / API 地址）
     init();
     playerInit();
     useAuth.getState().bootstrap();
@@ -199,6 +202,8 @@ export function App() {
         return '设置';
       case 'settings.import':
         return '导入歌曲';
+      case 'settings.netease':
+        return '网易云 API';
       case 'netease.login':
         return '网易云登录';
       case 'netease.playlists':
@@ -214,6 +219,33 @@ export function App() {
     },
     [],
   );
+
+  /** 打开主页第 index 项（轮盘 SELECT 与列表点按共用），带图标飞入动画 */
+  function openHomeIcon(index: number) {
+    const favId = neUser?.account.id;
+    const routes: Record<number, ScreenType> = {
+      0: { name: 'music' },
+      1: neUser ? { name: 'netease.playlists' } : { name: 'netease.login' },
+      2: { name: 'music.albums' },
+      3: neUser ? { name: 'netease.playlist', playlistId: favId! } : { name: 'netease.login' },
+      4: { name: 'search' },
+      5: { name: 'settings' },
+    };
+    const target = routes[index];
+    if (!target) return;
+    setHomeIndex(index);
+    const iconRect = getHomeIconRect(index);
+    const screenRect = getScreenBezelRect();
+    if (iconRect && screenRect) {
+      setNavAnim({ kind: 'push', iconRect, screenRect });
+      commitNav(() => {
+        push(target);
+        setNavAnim(null);
+      });
+    } else {
+      push(target);
+    }
+  }
 
   // SELECT 处理
   function handleSelect() {
@@ -238,34 +270,9 @@ export function App() {
 
     const item = items[selectedIndex];
     switch (current.name) {
-      case 'home': {
-        const favId = neUser?.account.id;
-        const iconRoutes: Record<number, ScreenType> = {
-          0: { name: 'music' },
-          1: neUser ? { name: 'netease.playlists' } : { name: 'netease.login' },
-          2: { name: 'music.albums' },
-          3: neUser
-            ? { name: 'netease.playlist', playlistId: favId! }
-            : { name: 'netease.login' },
-          4: { name: 'search' },
-          5: { name: 'settings' },
-        };
-        if (!(selectedIndex in iconRoutes)) return;
-        const target = iconRoutes[selectedIndex];
-        const iconRect = getHomeIconRect(selectedIndex);
-        const screenRect = getScreenBezelRect();
-        setHomeIndex(selectedIndex);
-        if (iconRect && screenRect) {
-          setNavAnim({ kind: 'push', iconRect, screenRect });
-          commitNav(() => {
-            push(target);
-            setNavAnim(null);
-          });
-        } else {
-          push(target);
-        }
+      case 'home':
+        openHomeIcon(selectedIndex);
         return;
-      }
       case 'music':
         selectMusicItem(selectedIndex);
         return;
@@ -279,7 +286,10 @@ export function App() {
         if (item.kind === 'track') playSongAt(selectedIndex);
         return;
       case 'settings':
-        settingsAction(selectedIndex);
+        if (item) settingsAction(item.label);
+        return;
+      case 'settings.netease':
+        neteaseApiAction(item?.label);
         return;
       case 'netease.login':
         // 根据 label 分发到登录页内置动作
@@ -339,7 +349,7 @@ export function App() {
   function renderBody() {
     switch (current.name) {
       case 'home':
-        return <HomeView />;
+        return <HomeView onPick={openHomeIcon} />;
       case 'music':
         return <MusicView />;
       case 'music.songs':
@@ -360,6 +370,8 @@ export function App() {
         return <SettingsView />;
       case 'settings.import':
         return <SettingsView />;
+      case 'settings.netease':
+        return <NeteaseApiView />;
       case 'netease.login':
         return <NeteaseLoginView />;
       case 'netease.playlists':
@@ -367,7 +379,7 @@ export function App() {
       case 'netease.playlist':
         return <NeteasePlaylistView playlistId={current.playlistId} />;
       default:
-        return <HomeView />;
+        return <HomeView onPick={openHomeIcon} />;
     }
   }
 
