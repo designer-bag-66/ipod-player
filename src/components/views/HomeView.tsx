@@ -1,13 +1,15 @@
 // ============================================================
 // HomeView - 主页菜单
 // 音乐资料 / 歌单（网易云） / 专辑 / 我喜欢的（网易云） / 搜索 / 设置
+// 两种呈现：图标网格（grid）/ 列表（list），由设置里的「主页布局」切换
 // ============================================================
 
 import { useEffect, useMemo } from 'react';
-import { useLibrary } from '@/stores/library';
 import { useAuth } from '@/stores/auth';
 import { useNavigation } from '@/stores/navigation';
-import type { Screen } from '@/types';
+import { usePrefs } from '@/stores/prefs';
+import { ListMenu } from '@/components/ui/ListMenu';
+import type { MenuItem, Screen } from '@/types';
 
 interface IconItem {
   label: string;
@@ -15,8 +17,12 @@ interface IconItem {
   screen: Screen;
 }
 
-export function HomeView() {
-  const tracks = useLibrary((s) => s.tracks);
+interface Props {
+  /** 选中某项（由 main 统一处理跳转 + 飞入动画） */
+  onPick?: (index: number) => void;
+}
+
+export function HomeView({ onPick }: Props) {
   const neUser = useAuth((s) => s.user);
   const setItems = useNavigation((s) => s.setItems);
   const setIndex = useNavigation((s) => s.setIndex);
@@ -24,6 +30,7 @@ export function HomeView() {
   const homeIndex = useNavigation((s) => s.homeIndex);
   const setHomeIndex = useNavigation((s) => s.setHomeIndex);
   const push = useNavigation((s) => s.push);
+  const homeLayout = usePrefs((s) => s.homeLayout);
 
   const ICONS = useMemo<IconItem[]>(() => {
     const favId = neUser?.account.id;
@@ -47,18 +54,17 @@ export function HomeView() {
     ];
   }, [neUser]);
 
-  useEffect(() => {
-    // 把图标作为导航 items 注册，使轮盘滑动可以改变 selectedIndex
-    setItems(
-      ICONS.map((icon) => ({
-        kind: 'submenu' as const,
-        label: icon.label,
-        meta: '',
-      })),
-    );
-  }, [ICONS, setItems]);
+  const listItems = useMemo<MenuItem[]>(
+    () => ICONS.map((icon) => ({ kind: 'submenu' as const, label: icon.label, meta: '' })),
+    [ICONS],
+  );
 
-  // 进入主页后，恢复保存的图标选中位置
+  useEffect(() => {
+    // 把条目注册给导航层，使轮盘滑动可以改变 selectedIndex
+    setItems(listItems);
+  }, [listItems, setItems]);
+
+  // 进入主页后，恢复保存的选中位置
   useEffect(() => {
     if (homeIndex > 0) setIndex(homeIndex);
     // 只在挂载时执行一次
@@ -70,9 +76,19 @@ export function HomeView() {
     setHomeIndex(selectedIndex);
   }, [selectedIndex, setHomeIndex]);
 
+  const pick = (i: number) => {
+    setIndex(i);
+    if (onPick) {
+      onPick(i);
+      return;
+    }
+    const target = ICONS[i]?.screen;
+    if (target) push(target);
+  };
+
   return (
     <div className="h-full flex flex-col z-10 relative">
-      <div className="text-center mt-1 mb-2 z-10">
+      <div className="text-center mt-1 mb-1 z-10">
         <h1
           className="text-[15px] font-extrabold tracking-wide"
           style={{ color: 'var(--screen-text-primary)' }}
@@ -87,19 +103,30 @@ export function HomeView() {
         </div>
       </div>
 
-      <div className="icon-grid">
-        {ICONS.map((item, i) => (
-          <div
-            key={item.label}
-            data-home-icon-index={i}
-            className={`icon-cell ${i === selectedIndex ? 'selected' : ''}`}
-            onClick={() => push(item.screen)}
-          >
-            <div className="icon-bubble">{item.icon}</div>
-            <span className="icon-label">{item.label}</span>
-          </div>
-        ))}
-      </div>
+      {homeLayout === 'list' ? (
+        <div className="home-list flex-1 min-h-0">
+          <ListMenu
+            items={listItems}
+            selectedIndex={selectedIndex}
+            indexAttr="home-icon"
+            onPick={pick}
+          />
+        </div>
+      ) : (
+        <div className="icon-grid">
+          {ICONS.map((item, i) => (
+            <div
+              key={item.label}
+              data-home-icon-index={i}
+              className={`icon-cell ${i === selectedIndex ? 'selected' : ''}`}
+              onClick={() => pick(i)}
+            >
+              <div className="icon-bubble">{item.icon}</div>
+              <span className="icon-label">{item.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
