@@ -13,10 +13,12 @@ interface Props {
   rightSlot?: ReactNode;
   /** 屏幕亮度 0.3 ~ 1 */
   brightness?: number;
+  /** 沉浸式视图（如正在播放）自带导航条，隐藏通用状态栏 */
+  hideStatusbar?: boolean;
   children: ReactNode;
 }
 
-export function Screen({ title, rightSlot, brightness = 1, children }: Props) {
+export function Screen({ title, rightSlot, brightness = 1, hideStatusbar, children }: Props) {
   return (
     <>
       <svg width="0" height="0" aria-hidden="true" className="absolute">
@@ -43,7 +45,7 @@ export function Screen({ title, rightSlot, brightness = 1, children }: Props) {
           className="screen-surface w-full h-full flex flex-col"
           style={brightness < 1 ? { filter: `brightness(${brightness})` } : undefined}
         >
-          <div className="screen-statusbar" style={{ justifyContent: 'center' }}>
+          <div className="screen-statusbar" style={{ justifyContent: 'center', display: hideStatusbar ? 'none' : 'flex' }}>
             <span className="title">{title}</span>
           </div>
           <div className="flex-1 relative overflow-hidden">
