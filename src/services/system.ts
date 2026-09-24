@@ -6,7 +6,7 @@
 
 import { Capacitor } from '@capacitor/core';
 import { ScreenBrightness } from '@capacitor-community/screen-brightness';
-import { VolumeControl } from '@odion-cloud/capacitor-volume-control';
+import { VolumeControl } from 'capacitor-volume-controller';
 import { usePlayer } from '@/stores/player';
 import { getSetting, setSetting } from '@/services/storage';
 
