@@ -251,6 +251,33 @@ export async function loginQrCheck(key: string): Promise<QrCheckResp> {
   return r;
 }
 
+// ---------------- 手机号登录 ----------------
+export interface CellphoneSentResp {
+  code: number;
+  message?: string;
+}
+/** 发送短信验证码 */
+export async function sendCellphoneCode(phone: string): Promise<CellphoneSentResp> {
+  const r = await call<CellphoneSentResp>('/captcha/sent', { phone });
+  return { code: r.code, message: r.message };
+}
+
+export interface CellphoneLoginResp {
+  code: number; // 200 = 成功
+  message?: string;
+  profile?: { userId: number; nickname: string; avatarUrl: string };
+  account?: { id: number };
+  cookie?: string;
+}
+/** 手机号 + 短信验证码登录 */
+export async function loginCellphone(phone: string, captcha: string): Promise<CellphoneLoginResp> {
+  const r = await call<CellphoneLoginResp>('/login/cellphone', { phone, captcha });
+  if (r.code === 200 && r.cookie) {
+    setCookie(r.cookie);
+  }
+  return r;
+}
+
 /** 用当前 cookie 验证登录态 */
 export async function fetchAccount(): Promise<NetEaseUser | null> {
   if (!_cookie) return null;
