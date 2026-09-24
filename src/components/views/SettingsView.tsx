@@ -10,6 +10,7 @@ import { usePlayer, EQ_LABELS, EQ_ORDER } from '@/stores/player';
 import { useNavigation } from '@/stores/navigation';
 import { ListMenu } from '@/components/ui/ListMenu';
 import { clearAll } from '@/services/storage';
+import { setVolumeLevel } from '@/services/system';
 
 export function SettingsView() {
   const tracks = useLibrary((s) => s.tracks);
@@ -60,7 +61,7 @@ export function SettingsView() {
           return 'rerender';
         }
         case 5:
-          p.setVolume(p.volume >= 0.999 ? 0 : Math.min(1, p.volume + 0.1));
+          void setVolumeLevel(p.volume >= 0.999 ? 0 : Math.min(1, p.volume + 0.1));
           return 'rerender';
         case 8:
           if (confirm('确认清空曲库？此操作不可撤销。')) {
