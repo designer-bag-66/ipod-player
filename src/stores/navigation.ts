@@ -54,7 +54,12 @@ export const useNavigation = create<NavState>((set, get) => ({
   },
 
   setItems(items) {
-    set({ items, selectedIndex: 0 });
+    // 保留当前选中位置（仅在新列表更短时回落到 0）
+    // 这样在设置页切换开关时不会把选中项弹回顶部
+    set((st) => ({
+      items,
+      selectedIndex: st.selectedIndex < items.length ? st.selectedIndex : 0,
+    }));
   },
 
   moveIndex(delta) {
