@@ -1,171 +1,162 @@
 // ============================================================
-// 网易云视图：登录 + 我的歌单 + 歌单详情
+// 网易云相关界面
+// - NeteaseLoginView：手机号 + 短信验证码登录（替代扫码）
+// - NeteasePlaylistsView / NeteasePlaylistView：歌单与播放
 // ============================================================
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/stores/auth';
 import { useNavigation } from '@/stores/navigation';
 import { usePlayer } from '@/stores/player';
-import { ListMenu } from '@/components/ui/ListMenu';
-import {
-  fetchUserPlaylists,
-  fetchPlaylistDetail,
-  hasCookie,
-  NETEASE_BASES,
-  type NetEasePlaylistSummary,
-  type NetEaseTrack,
-  type NetEaseUser,
-} from '@/services/netease';
+import type { MenuItem } from '@/types';
+import { NETEASE_BASES } from '@/services/netease';
 
-// ============================================================
-// 登录视图（QR 扫码）
-// ============================================================
+export interface NeteaseViewProps {
+  playlistId?: number;
+}
+
+/** 模块级缓存，供 SELECT 事件在 main.tsx 中查到对应 id */
+let cachedPlaylists: any[] = [];
+let cachedPlaylist: any = null;
+
+function toNeteaseTrack(t: any) {
+  return {
+    id: `netease:${t.id}`,
+    title: t.name,
+    artist: (t.ar || t.artists || []).map((a: any) => a.name).join('/') || '未知艺人',
+    album: (t.al && t.al.name) || '未知专辑',
+    artworkUrl: t.al && t.al.picUrl ? `${t.al.picUrl}?param=300y300` : undefined,
+    duration: Math.floor((t.dt || 0) / 1000),
+  };
+}
+
+// 播放歌单中的某一首（纯播放，不改写曲库）
+export function playNeteaseSongAt(playlist: any, idx: number) {
+  const tracks = (playlist.tracks || []).map(toNeteaseTrack);
+  const t = tracks[idx];
+  if (!t) return;
+  usePlayer.getState().playNeteaseTrack(t, tracks);
+}
+
 export function NeteaseLoginView() {
   const apiOnline = useAuth((s) => s.apiOnline);
   const user = useAuth((s) => s.user);
-  const qrImg = useAuth((s) => s.qrImg);
-  const qrStatus = useAuth((s) => s.qrStatus);
+  const phone = useAuth((s) => s.phone);
+  const code = useAuth((s) => s.code);
+  const codeStatus = useAuth((s) => s.codeStatus);
+  const codeError = useAuth((s) => s.codeError);
   const errorMessage = useAuth((s) => s.errorMessage);
-  const accountError = useAuth((s) => s.accountError);
   const loginDebug = useAuth((s) => s.loginDebug);
-  const startLogin = useAuth((s) => s.startLogin);
-  const resetLogin = useAuth((s) => s.resetLogin);
-  const refreshAccount = useAuth((s) => s.refreshAccount);
-  const setItems = useNavigation((s) => s.setItems);
+  const setPhone = useAuth((s) => s.setPhone);
+  const setCode = useAuth((s) => s.setCode);
+  const sendCode = useAuth((s) => s.sendCode);
+  const verifyCode = useAuth((s) => s.verifyCode);
   const push = useNavigation((s) => s.push);
+  const setItems = useNavigation((s) => s.setItems);
 
-  // 登录成功（user 已就绪）→ 0.6s 后跳到歌单列表
+  // 登录成功后跳转到歌单列表
   useEffect(() => {
     if (user) {
-      const t = window.setTimeout(() => {
-        push({ name: 'netease.playlists' });
-      }, 600);
+      const t = window.setTimeout(() => push({ name: 'netease.playlists' }), 600);
       return () => window.clearTimeout(t);
     }
   }, [user, push]);
 
-  // QR 已成功但 fetchAccount 失败 → 也跳到歌单（让歌单页继续重试）
+  // 注册一条 action，使轮盘 SELECT 也能触发主操作
   useEffect(() => {
-    if (qrStatus === 'success' && !user && accountError) {
-      // 不自动跳，让用户手动按 SELECT 重试 / 进入
-    }
-  }, [qrStatus, user, accountError]);
-
-  // 列表项注册
-  useEffect(() => {
-    if (!apiOnline) {
-      setItems([
-        { kind: 'title', label: `服务离线 · ${errorMessage.slice(0, 60) || '请求超时'}` },
-        { kind: 'action', label: '重试连接', meta: '' },
-      ]);
-      return;
-    }
-
-    let label = '使用网易云 APP 扫码';
-    if (qrStatus === 'expired') label = '二维码已过期';
-    if (qrStatus === 'success' && !user) label = '登录成功，按 SELECT 重试';
-
-    setItems([
-      { kind: 'title', label },
-      { kind: 'action', label: qrImg ? '刷新二维码' : '生成二维码', meta: '' },
-      ...(qrStatus === 'success' && !user
-        ? [{ kind: 'action' as const, label: '重试获取用户信息', meta: '' }]
-        : []),
-    ]);
-  }, [apiOnline, errorMessage, qrImg, qrStatus, user, accountError, setItems]);
-
-  // 进入登录页：API 在线则自动生成 QR
-  useEffect(() => {
-    if (apiOnline && !qrImg && qrStatus === 'idle') {
-      startLogin();
-    }
-  }, [apiOnline, qrImg, qrStatus, startLogin]);
-
-  // 离开登录页：清理轮询 + 状态
-  useEffect(() => {
+    (NeteaseLoginView as any).__select = () => {
+      useAuth.getState().primaryAction();
+    };
+    const label = !apiOnline ? '重试连接' : codeStatus === 'sent' ? '登录' : '获取验证码';
+    setItems([{ kind: 'action', label, meta: '' }]);
     return () => {
-      resetLogin();
+      setItems([]);
+      (NeteaseLoginView as any).__select = undefined;
     };
-  }, [resetLogin]);
+  }, [apiOnline, codeStatus, setItems]);
 
-  // 处理登录页 SELECT：item.label 区分动作
-  useEffect(() => {
-    (NeteaseLoginView as any).__select = (idx: number, label: string) => {
-      if (label === '重试获取用户信息') {
-        refreshAccount();
-        return;
-      }
-      if (label === '刷新二维码' || label === '生成二维码') {
-        startLogin();
-        return;
-      }
-    };
-  }, [refreshAccount, startLogin]);
+  if (user) {
+    return (
+      <div className="flex flex-col items-center mt-6">
+        {user.profile.avatarUrl ? (
+          <img src={user.profile.avatarUrl} className="w-12 h-12 rounded-full mb-2" alt="avatar" />
+        ) : null}
+        <div className="text-[13px] font-bold" style={{ color: 'var(--screen-text-primary)' }}>
+          {user.profile.nickname}
+        </div>
+        <div className="text-[10px] mt-1" style={{ color: 'var(--screen-text-muted)' }}>
+          登录成功，正在进入…
+        </div>
+      </div>
+    );
+  }
+
+  if (!apiOnline) {
+    return (
+      <div className="text-center mt-6 px-3">
+        <div className="text-[13px] font-bold mb-2" style={{ color: 'var(--screen-text-primary)' }}>
+          无法连接网易云 API
+        </div>
+        <div className="text-[11px] leading-relaxed mb-2" style={{ color: 'var(--screen-text-secondary)' }}>
+          {errorMessage}
+        </div>
+        <div className="text-[10px]" style={{ color: 'var(--screen-text-muted)' }}>
+          按 SELECT 重试连接
+        </div>
+      </div>
+    );
+  }
+
+  const sending = codeStatus === 'sending';
+  const sent = codeStatus === 'sent';
+  const verifying = codeStatus === 'verifying';
 
   return (
-    <div className="h-full w-full flex flex-col items-center justify-start pt-2 pb-2 px-3">
-      {!apiOnline ? (
-        <div className="text-center mt-6 px-2">
-          <div className="text-[13px] font-bold mb-2" style={{ color: 'var(--screen-text-primary)' }}>
-            无法连接网易云 API
-          </div>
-          <div className="text-[11px] leading-relaxed mb-2" style={{ color: 'var(--screen-text-secondary)' }}>
-            {errorMessage || '请求超时或无响应，请按 SELECT 重试连接'}
-          </div>
-          <div className="my-1 px-2 py-1 bg-black/5 rounded font-mono text-[9px] whitespace-pre-line break-all" style={{ color: 'var(--screen-text-secondary)' }}>
-            {NETEASE_BASES.join('\n')}
-          </div>
-          <div className="text-[10px] mt-1" style={{ color: 'var(--screen-text-secondary)' }}>
-            可在 Safari 打开上方地址测试是否可达
-          </div>
+    <div className="h-full w-full flex flex-col items-center justify-start pt-3 pb-3 px-4">
+      <div className="text-[12px] font-bold mb-3" style={{ color: 'var(--screen-text-primary)' }}>
+        网易云手机号登录
+      </div>
+
+      <input
+        className="np-input"
+        type="tel"
+        inputMode="numeric"
+        placeholder="请输入手机号"
+        value={phone}
+        maxLength={11}
+        onChange={(e) => setPhone(e.target.value)}
+      />
+      <input
+        className="np-input"
+        type="tel"
+        inputMode="numeric"
+        placeholder="短信验证码"
+        value={code}
+        maxLength={6}
+        disabled={!sent && !verifying}
+        onChange={(e) => setCode(e.target.value)}
+        style={{ marginTop: 8 }}
+      />
+
+      <button
+        className="np-btn"
+        disabled={sending || verifying}
+        onClick={() => (sent || verifying ? verifyCode() : sendCode())}
+      >
+        {sent || verifying ? (verifying ? '登录中…' : '登录') : sending ? '发送中…' : '获取验证码'}
+      </button>
+
+      {codeError ? (
+        <div className="text-[11px] mt-3 text-center" style={{ color: '#ff4d5e' }}>
+          {codeError}
         </div>
-      ) : qrStatus === 'success' && !user ? (
-        <>
-          <div className="qr-frame" style={{ opacity: 0.4 }}>
-            {qrImg && <img src={qrImg} alt="qrcode" className="qr-img" />}
-          </div>
-          <div className="qr-status mt-3 text-[12px] font-bold" style={{ color: '#1a936f' }}>
-            ✓ 扫码成功
-          </div>
-          <div className="qr-status mt-1 text-[11px]" style={{ color: 'var(--screen-text-secondary)' }}>
-            {accountError || '正在获取用户信息…'}
-          </div>
-          <div className="qr-tip mt-1 text-[9px]" style={{ color: 'var(--screen-text-muted)' }}>
-            按 SELECT 重试获取用户信息
-          </div>
-        </>
-      ) : user ? (
-        <div className="flex flex-col items-center mt-6">
-          <img src={user.profile.avatarUrl} className="w-12 h-12 rounded-full mb-2" alt="avatar" />
-          <div className="text-[13px] font-bold" style={{ color: 'var(--screen-text-primary)' }}>
-            {user.profile.nickname}
-          </div>
-          <div className="text-[10px] mt-1" style={{ color: 'var(--screen-text-muted)' }}>
-            登录成功，正在进入…
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="qr-frame">
-            {qrImg ? (
-              <img src={qrImg} alt="qrcode" className="qr-img" />
-            ) : (
-              <div className="qr-placeholder">生成中…</div>
-            )}
-          </div>
-          <div className="qr-status mt-2 text-[11px]" style={{ color: 'var(--screen-text-secondary)' }}>
-            {qrStatus === 'ready' && '请使用网易云 APP 扫码'}
-            {qrStatus === 'scanned' && '已扫码，请在手机上确认登录'}
-            {qrStatus === 'expired' && '二维码已过期，按 SELECT 刷新'}
-            {qrStatus === 'error' && (errorMessage || '出错，请重试')}
-            {qrStatus === 'idle' && '准备中…'}
-          </div>
-          <div className="qr-tip mt-1 text-[9px]" style={{ color: 'var(--screen-text-muted)' }}>
-            网易云 APP → 我的 → 右上角扫码
-          </div>
-        </>
-      )}
-      {!user && apiOnline && loginDebug ? (
+      ) : null}
+
+      <div className="text-[9px] mt-3 text-center leading-relaxed" style={{ color: 'var(--screen-text-muted)' }}>
+        {sent ? '验证码已发送，请查收短信' : '使用手机号 + 短信验证码登录'}
+      </div>
+
+      {loginDebug ? (
         <div className="mt-2 px-2 text-[9px] whitespace-pre-wrap break-all text-center" style={{ color: 'var(--screen-text-muted)' }}>
           [debug] {loginDebug}
         </div>
@@ -174,196 +165,203 @@ export function NeteaseLoginView() {
   );
 }
 
-// ============================================================
-// 我的歌单列表
-// ============================================================
 export function NeteasePlaylistsView() {
   const user = useAuth((s) => s.user);
-  const refreshAccount = useAuth((s) => s.refreshAccount);
-  const logout = useAuth((s) => s.logout);
-  const setItems = useNavigation((s) => s.setItems);
-  const items = useNavigation((s) => s.items);
-  const selectedIndex = useNavigation((s) => s.selectedIndex);
   const push = useNavigation((s) => s.push);
+  const setItems = useNavigation((s) => s.setItems);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [playlists, setPlaylists] = useState<any[]>([]);
 
-  const [list, setList] = useState<NetEasePlaylistSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // 进入时若无 user 但 cookie 还在，尝试补救
-  useEffect(() => {
-    if (!user && hasCookie()) {
-      console.log('[netease] trying to refresh account on playlists view');
-      refreshAccount();
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(
+        `${NETEASE_BASES[0]}/user/playlist?uid=${user?.account.id}&timestamp=${Date.now()}`,
+        { credentials: 'include' },
+      );
+      const data = await res.json();
+      if (data.code === 200) {
+        setPlaylists(data.playlist || []);
+      } else {
+        setError(data.message || `加载失败（code=${data.code}）`);
+      }
+    } catch (e: any) {
+      setError(String(e));
+      useAuth.getState().refreshAccount();
     }
-  }, [user, refreshAccount]);
+    setLoading(false);
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const data = await fetchUserPlaylists(user.account.id);
-        if (!cancelled) setList(data);
-      } catch (err) {
-        console.error('[netease] playlists failed', err);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    if (user) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   useEffect(() => {
-    const items: any[] = [];
-    if (user) {
-      items.push({
-        kind: 'action',
-        label: `${user.profile.nickname} · 退出`,
-        meta: '',
-      });
-    }
-    if (loading) {
-      items.push({ kind: 'title', label: '加载中…' });
-    } else if (list.length === 0) {
-      items.push({ kind: 'title', label: '（无歌单）' });
-    } else {
-      // 第 0 项留给「退出登录」，从 1 开始才是歌单
-      for (const p of list) {
-        items.push({
-          kind: 'submenu',
-          label: p.name,
-          meta: String(p.trackCount),
-        });
-      }
-    }
-    setItems(items);
-  }, [user, list, loading, setItems, logout]);
+    cachedPlaylists = playlists;
+    setItems(
+      playlists.map((p) => ({
+        kind: 'submenu' as const,
+        label: p.name,
+        meta: `${(p.trackCount || 0)} 首`,
+      })) as MenuItem[],
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playlists]);
 
-  // 自定义 SELECT 处理：列表项 → 进入 playlist；行为第 0 项 → 退出登录
-  useEffect(() => {
-    (NeteasePlaylistsView as any).__select = (idx: number) => {
-      if (idx === 0 && user) {
-        logout();
-        return;
-      }
-      // list 偏移 1
-      const plIdx = idx - 1;
-      if (plIdx >= 0 && plIdx < list.length) {
-        push({ name: 'netease.playlist', playlistId: list[plIdx].id });
-      }
-    };
-  }, [user, list, logout, push]);
+  if (loading) {
+    return (
+      <div className="text-center mt-6 text-[11px]" style={{ color: 'var(--screen-text-secondary)' }}>
+        加载歌单中…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center mt-6 px-3">
+        <div className="text-[11px] mb-2" style={{ color: 'var(--screen-text-primary)' }}>
+          加载失败
+        </div>
+        <div className="text-[10px] mb-2" style={{ color: 'var(--screen-text-secondary)' }}>
+          {error}
+        </div>
+        <button className="np-btn" onClick={load}>
+          重试
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="h-full w-full flex flex-col">
-      {user && list.length > 0 && (
-        <div className="px-2 pt-1 pb-1 flex items-center gap-2 border-b border-black/5">
-          <img src={user.profile.avatarUrl} className="w-6 h-6 rounded-full" alt="avatar" />
-          <span className="text-[11px] font-semibold" style={{ color: 'var(--screen-text-primary)' }}>
-            {user.profile.nickname}
-          </span>
-          <span className="text-[9px]" style={{ color: 'var(--screen-text-muted)' }}>
-            {list.length} 个歌单
-          </span>
-        </div>
-      )}
-      <div className="flex-1 min-h-0">
-        <ListMenu items={items} selectedIndex={selectedIndex} />
+    <div className="px-3 pt-2">
+      <div className="text-[10px] mb-1" style={{ color: 'var(--screen-text-muted)' }}>
+        共 {playlists.length} 个歌单
       </div>
+      <button className="np-btn" onClick={() => useAuth.getState().logout()}>
+        退出登录
+      </button>
     </div>
   );
 }
 
-export function selectNeteasePlaylistItem(idx: number) {
-  (NeteasePlaylistsView as any).__select?.(idx);
-}
-
-// ============================================================
-// 单个歌单详情
-// ============================================================
-export function NeteasePlaylistView({ playlistId }: { playlistId: number }) {
-  const setItems = useNavigation((s) => s.setItems);
-  const items = useNavigation((s) => s.items);
+export function NeteasePlaylistView({ playlistId }: NeteaseViewProps) {
   const selectedIndex = useNavigation((s) => s.selectedIndex);
-  const playNeteaseTrack = usePlayer((s) => s.playNeteaseTrack);
+  const push = useNavigation((s) => s.push);
+  const setItems = useNavigation((s) => s.setItems);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [playlist, setPlaylist] = useState<any>(null);
 
-  const [meta, setMeta] = useState<NetEasePlaylistSummary | null>(null);
-  const [tracks, setTracks] = useState<NetEaseTrack[]>([]);
-  const [loading, setLoading] = useState(true);
+  const load = async () => {
+    if (playlistId == null) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(
+        `${NETEASE_BASES[0]}/playlist/detail?id=${playlistId}&timestamp=${Date.now()}`,
+        { credentials: 'include' },
+      );
+      const data = await res.json();
+      if (data.code === 200) {
+        const tracks = (data.playlist.tracks || []).map(toNeteaseTrack);
+        setPlaylist({ ...data.playlist, tracks });
+      } else {
+        setError(data.message || `加载失败（code=${data.code}）`);
+      }
+    } catch (e: any) {
+      setError(String(e));
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const { playlist, tracks } = await fetchPlaylistDetail(playlistId);
-        if (!cancelled) {
-          setMeta(playlist);
-          setTracks(tracks);
-        }
-      } catch (err) {
-        console.error('[netease] detail failed', err);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playlistId]);
 
   useEffect(() => {
-    if (loading) {
-      setItems([{ kind: 'title', label: '加载中…' }]);
-    } else if (tracks.length === 0) {
-      setItems([{ kind: 'title', label: '（空歌单）' }]);
-    } else {
-      setItems(
-        tracks.map((t) => ({
-          kind: 'track' as const,
-          label: t.name,
-          meta: t.ar.map((a) => a.name).join(' / '),
-          trackId: `netease:${t.id}`,
-        })),
-      );
-    }
-  }, [loading, tracks, setItems]);
+    if (!playlist) return;
+    cachedPlaylist = playlist;
+    setItems(
+      playlist.tracks.map((t: any) => ({
+        kind: 'action' as const,
+        label: t.title,
+        meta: t.artist,
+        disabled: false,
+      })) as MenuItem[],
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playlist]);
 
-  useEffect(() => {
-    (NeteasePlaylistView as any).__lastPlay = (idx: number) => {
-      const t = tracks[idx];
-      if (!t) return;
-      // 先抓所有 URL 再批量播放（首曲先放，其余到队列）
-      playNeteaseTrack(t, tracks);
-    };
-  }, [tracks, playNeteaseTrack]);
+  if (loading) {
+    return (
+      <div className="text-center mt-6 text-[11px]" style={{ color: 'var(--screen-text-secondary)' }}>
+        加载歌曲中…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center mt-6 px-3">
+        <div className="text-[11px] mb-2" style={{ color: 'var(--screen-text-primary)' }}>
+          加载失败
+        </div>
+        <div className="text-[10px] mb-2" style={{ color: 'var(--screen-text-secondary)' }}>
+          {error}
+        </div>
+        <button className="np-btn" onClick={() => void load()}>
+          重试
+        </button>
+      </div>
+    );
+  }
+
+  if (!playlist) return null;
 
   return (
-    <div className="h-full w-full flex flex-col">
-      {meta && (
-        <div className="px-2 pt-1 pb-1 flex items-center gap-2 border-b border-black/5">
-          <img src={`${meta.coverImgUrl}?param=120y120`} className="w-7 h-7 rounded" alt="cover" />
-          <div className="flex-1 min-w-0">
-            <div className="text-[11px] font-bold truncate" style={{ color: 'var(--screen-text-primary)' }}>
-              {meta.name}
-            </div>
-            <div className="text-[9px] truncate" style={{ color: 'var(--screen-text-muted)' }}>
-              {meta.creator?.nickname ?? ''} · {meta.trackCount} 首
-            </div>
+    <div className="px-3 pt-2">
+      <div className="flex items-center gap-2 mb-2">
+        {playlist.coverImgUrl ? (
+          <img
+            src={`${playlist.coverImgUrl}?param=96y96`}
+            className="w-12 h-12 rounded-lg"
+            alt="cover"
+          />
+        ) : null}
+        <div className="min-w-0">
+          <div className="text-[12px] font-bold truncate" style={{ color: 'var(--screen-text-primary)' }}>
+            {playlist.name}
+          </div>
+          <div className="text-[10px]" style={{ color: 'var(--screen-text-muted)' }}>
+            {playlist.tracks.length} 首
           </div>
         </div>
-      )}
-      <div className="flex-1 min-h-0">
-        <ListMenu items={items} selectedIndex={selectedIndex} />
       </div>
+      <div className="text-[10px] mb-2" style={{ color: 'var(--screen-text-muted)' }}>
+        滚动选择歌曲，按 SELECT 播放
+      </div>
+      {playlist.tracks[selectedIndex] ? (
+        <button
+          className="np-btn"
+          onClick={() => playNeteaseSongAt(playlist, selectedIndex)}
+        >
+          播放选中
+        </button>
+      ) : null}
     </div>
   );
 }
 
-export function playNeteaseSongAt(idx: number) {
-  (NeteasePlaylistView as any).__lastPlay?.(idx);
+export function selectNeteasePlaylistItem(index: number) {
+  const p = cachedPlaylists[index];
+  if (p) useNavigation.getState().push({ name: 'netease.playlist', playlistId: p.id });
+}
+
+/** 在当前歌单内播放指定索引（供轮盘 SELECT 与「播放选中」按钮共用） */
+export function playSelectedPlaylistTrack(index: number) {
+  if (cachedPlaylist) playNeteaseSongAt(cachedPlaylist, index);
 }
