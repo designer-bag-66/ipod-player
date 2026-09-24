@@ -50,9 +50,9 @@ body {
 
 /* ---------- iPod 外壳 ---------- */
 .ipod-shell {
-  /* 用 vw/vh（非 dvh）：dvh 在切后台/恢复时会变化，导致外壳尺寸跳变 */
-  width: min(420px, min(92vw, 42vh));
-  max-height: 100vh;
+  /* 只用 vw 限宽：切后台后 iOS 的 vh 计算值可能异常变大，宽度因此超出屏幕被裁切偏移 */
+  width: min(420px, 92vw);
+  max-height: 100%;
   margin: 0 auto;
   padding: clamp(8px, 2vw, 14px);
   background: #000000;
