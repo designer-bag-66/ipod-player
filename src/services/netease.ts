@@ -42,24 +42,46 @@ export interface NetEaseUser {
 // 远程 API（Vercel 部署的 NeteaseCloudMusicApi，CORS 默认全开）
 // 自定义域名优先（国内直连），vercel.app 作为兜底；任一地址可用即自动切换
 // 本地开发如需走 Vite 代理，在 .env.local 设置 VITE_NETEASE_API=/netease
-const DEFAULT_BASES = [
+const BUILTIN_BASES = [
   'https://api.6qxxvp.top',
   'https://api-enhanced-five-puce.vercel.app',
 ];
 
-const ENV_BASE = ((import.meta as any).env?.VITE_NETEASE_API as string | undefined) || '';
-
-export const NETEASE_BASES: string[] = ENV_BASE
-  ? [ENV_BASE, ...DEFAULT_BASES.filter((b) => b !== ENV_BASE)]
-  : DEFAULT_BASES;
-
-/** 当前生效的地址；checkApiAvailable 会把第一个可用的地址设为生效地址 */
-let _activeBase = NETEASE_BASES[0];
-
-export function getActiveBase(): string {
-  return _activeBase;
+function normalizeBase(b: string): string {
+  const t = b.trim().replace(/\/+$/, '');
+  if (!t) return '';
+  return /^https?:\/\//i.test(t) ? t : `https://${t}`;
 }
 
+const ENV_BASE = normalizeBase(
+  ((import.meta as any).env?.VITE_NETEASE_API as string | undefined) || '',
+);
+
+/** 内置候选地址（含构建期环境变量注入的地址） */
+export const NETEASE_BASES: string[] = ENV_BASE
+  ? [ENV_BASE, ...BUILTIN_BASES.filter((b) => normalizeBase(b) !== ENV_BASE)]
+  : BUILTIN_BASES.slice();
+
+/** 用户在「设置 → 网易云 API 地址」里填的地址（空串 = 用内置） */
+export function getCustomBase(): string {
+  return normalizeBase(usePrefs.getState().neteaseBase || '');
+}
+
+/** 实际要尝试的地址列表：自定义地址优先，其次内置兜底 */
+export function getBases(): string[] {
+  const custom = getCustomBase();
+  if (!custom) return NETEASE_BASES;
+  return [custom, ...NETEASE_BASES.filter((b) => normalizeBase(b) !== custom)];
+}
+
+/** 当前生效的地址；checkApiAvailable 会把第一个可用的地址设为生效地址 */
+let _activeBase = '';
+
+export function getActiveBase(): string {
+  return _activeBase || getBases()[0];
+}
+
+/** @deprecated 请改用 getActiveBase()，它会跟随自定义地址切换 */
 export const NETEASE_BASE_URL = NETEASE_BASES[0];
 
 const COOKIE_KEY = 'netease_cookie';
@@ -71,6 +93,7 @@ let _cookie = localStorage.getItem(COOKIE_KEY) ?? '';
 
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
+import { usePrefs } from '@/stores/prefs';
 
 async function prefGet(key: string): Promise<string | null> {
   try {
@@ -116,10 +139,16 @@ async function prefRemove(key: string): Promise<void> {
 
 /** fetch 超时（ms）：防止 WKWebView 中请求挂起；Vercel 冷启动可能较慢，放宽到 20s */
 export const FETCH_TIMEOUT_MS = 20000;
+/** 可达性探测超时（ms）：探测只是打个 /banner 小请求，短超时避免逐个候选拖太久 */
+export const PROBE_TIMEOUT_MS = 6000;
 
-export async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+export async function fetchWithTimeout(
+  url: string,
+  init?: RequestInit,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<Response> {
   const ctrl = new AbortController();
-  const timer = window.setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: ctrl.signal });
   } finally {
@@ -193,16 +222,17 @@ async function call<T = any>(path: string, params: Record<string, string | numbe
   for (const [k, v] of Object.entries(params)) qs.set(k, String(v));
   // 避免缓存
   qs.set('_t', String(Date.now()));
+  const base = getActiveBase();
   const headers: Record<string, string> = {};
   if (_cookie) {
-    if (_activeBase.startsWith('http')) {
+    if (base.startsWith('http')) {
       // 跨域 fetch 不允许自定义 Cookie 请求头，改用 query 参数传递
       qs.set('cookie', _cookie);
     } else {
       headers['Cookie'] = _cookie;
     }
   }
-  const url = `${_activeBase}${path}${qs.toString() ? '?' + qs.toString() : ''}`;
+  const url = `${base}${path}${qs.toString() ? '?' + qs.toString() : ''}`;
   console.log('[netease] request', path, 'cookie-sent?', !!_cookie, _cookie ? _cookie.slice(0, 60) : '');
   const res = await fetchWithTimeout(url, { headers });
   const json: any = await res.json();
@@ -373,7 +403,7 @@ export function getLastApiError(): string {
 /** 逐个探测候选地址：第一个可用的会成为生效地址 */
 async function probeBase(base: string): Promise<{ ok: boolean; reason: string }> {
   try {
-    const res = await fetchWithTimeout(`${base}/banner?type=0&_t=${Date.now()}`);
+    const res = await fetchWithTimeout(`${base}/banner?type=0&_t=${Date.now()}`, undefined, PROBE_TIMEOUT_MS);
     let json: any;
     try {
       json = await res.json();
@@ -387,7 +417,7 @@ async function probeBase(base: string): Promise<{ ok: boolean; reason: string }>
   } catch (err: any) {
     const msg =
       err?.name === 'AbortError'
-        ? `请求超时（${FETCH_TIMEOUT_MS / 1000}s 无响应）`
+        ? `请求超时（${PROBE_TIMEOUT_MS / 1000}s 无响应）`
         : String(err?.message ?? err);
     return { ok: false, reason: msg };
   }
@@ -395,8 +425,9 @@ async function probeBase(base: string): Promise<{ ok: boolean; reason: string }>
 
 /** 检查网易云 API 服务是否可达，失败时记录原因 */
 export async function checkApiAvailable(): Promise<boolean> {
+  _activeBase = ''; // 重新走完整探测，避免沿用切换前的旧地址
   const reasons: string[] = [];
-  for (const base of NETEASE_BASES) {
+  for (const base of getBases()) {
     const host = base.replace(/^https?:\/\//, '');
     const r = await probeBase(base);
     if (r.ok) {
@@ -406,6 +437,11 @@ export async function checkApiAvailable(): Promise<boolean> {
     }
     reasons.push(`${host}: ${r.reason}`);
   }
-  _lastApiError = reasons.join(' | ').slice(0, 120);
+  _lastApiError = reasons.join(' | ').slice(0, 160);
   return false;
+}
+
+/** 重置生效地址（切换自定义地址后调用） */
+export function resetActiveBase(): void {
+  _activeBase = '';
 }
