@@ -17,7 +17,7 @@ import { setSetting, getSetting } from '@/services/storage';
 import {
   fetchSongUrl,
   lookupNeteaseTrack,
-  NETEASE_BASE_URL,
+  getActiveBase,
   type NetEaseTrack,
 } from '@/services/netease';
 
@@ -249,11 +249,18 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
         set({ status: 'error' });
         return;
       }
-      // 远程 API：音频直连网易云 CDN（audio.src 不受 CORS 限制，转 https 过 iOS ATS）
+      // 远程 API：音频直连网易云 CDN（audio.src 不受 CORS 限制）
+      // 仅当 API 本身是 https 时才把音频地址也升到 https（过 iOS ATS）；
+      // 若 API 是 http（例如局域网自建），保持原样，否则 http 音频会加载失败
       // 本地开发（BASE=/netease）：走 Vite 流代理
-      url = NETEASE_BASE_URL.startsWith('http')
-        ? item.url.replace(/^http:/, 'https:')
-        : `/netease-stream?u=${encodeURIComponent(item.url)}`;
+      const base = getActiveBase();
+      if (!base.startsWith('http')) {
+        url = `/netease-stream?u=${encodeURIComponent(item.url)}`;
+      } else if (base.startsWith('https')) {
+        url = item.url.replace(/^http:/, 'https:');
+      } else {
+        url = item.url;
+      }
     } else {
       const lib = useLibrary.getState();
       url = (await lib.getBlobUrl(track.id)) ?? null;
