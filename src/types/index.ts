@@ -70,6 +70,7 @@ export type Screen =
   | { name: 'search' }
   | { name: 'settings' }
   | { name: 'settings.import' }
+  | { name: 'settings.netease' }
   // ---- 网易云 ----
   | { name: 'netease.login' }
   | { name: 'netease.playlists' }
