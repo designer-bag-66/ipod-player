@@ -13,6 +13,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { angleFromCenter, createAccumulator, feedWheel, normalizeAngle } from '@/utils/angle';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Capacitor } from '@capacitor/core';
+import { usePrefs } from '@/stores/prefs';
+import { playTick, unlockSound } from '@/services/sound';
 
 interface Props {
   onSelect: () => void;
@@ -36,6 +38,7 @@ const LONG_PRESS_MS = 600;
 const LONG_PRESS_MOVE_PX = 14;
 
 async function haptic() {
+  if (!usePrefs.getState().haptics) return;
   if (!Capacitor.isNativePlatform()) {
     if ('vibrate' in navigator) navigator.vibrate(8);
     return;
@@ -105,6 +108,8 @@ export function ClickWheel({
 
     function onPointerDown(e: PointerEvent) {
       if (disabled) return;
+      // 首次手势里解锁 WebAudio，之后才听得到选择音效
+      unlockSound();
       const { cx, cy, radius } = getCenter();
       const dx = e.clientX - cx;
       const dy = e.clientY - cy;
@@ -173,6 +178,7 @@ export function ClickWheel({
         if (steps !== 0) {
           onWheel(steps);
           haptic();
+          playTick('scroll');
           movedRef.current = true;
           stepCountRef.current += Math.abs(steps);
         }
@@ -203,6 +209,7 @@ export function ClickWheel({
           if (!longFiredRef.current) {
             onSelect();
             haptic();
+            playTick('select');
           }
         } else if (startTargetRef.current === 'ring') {
           // 用按下时的角度判断按键，避免抬起时手指滑出扇形区导致失效
@@ -228,6 +235,7 @@ export function ClickWheel({
                 break;
             }
             haptic();
+            playTick(btn === 'menu' ? 'back' : 'select');
           }
         }
       }
