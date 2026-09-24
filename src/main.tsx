@@ -12,7 +12,14 @@ import { IPodShell } from '@/components/shell/IPodShell';
 import { Screen as ScreenShell } from '@/components/shell/Screen';
 import { ClickWheel } from '@/components/shell/ClickWheel';
 import { QuickPanel, type QuickAdjust } from '@/components/shell/QuickPanel';
-import { getSetting, setSetting } from '@/services/storage';
+import {
+  isNative,
+  readBrightness,
+  readVolume,
+  setBrightnessLevel,
+  setVolumeLevel,
+  watchVolume,
+} from '@/services/system';
 import { App as CapacitorApp } from '@capacitor/app';
 import { NavTransition, type NavAnimState } from '@/components/shell/NavTransition';
 import { HomeView } from '@/components/views/HomeView';
@@ -33,6 +40,8 @@ import {
 import { useAuth } from '@/stores/auth';
 
 const NAV_ANIM_MS = 280;
+/** 原生容器：亮度/音量直接改系统值，Web 端用 CSS 滤镜 + audio.volume 兜底 */
+const NATIVE = isNative();
 
 export function App() {
   const init = useLibrary((s) => s.init);
@@ -72,16 +81,23 @@ export function App() {
     init();
     playerInit();
     useAuth.getState().bootstrap();
-    getSetting<number>('brightness').then((b) => {
-      if (typeof b === 'number' && b > 0) setBrightness(b);
-    });
+    // 启动即用系统值同步亮度 / 音量（Web 端读本地设置）
+    void readBrightness().then(setBrightness);
+    void readVolume().then((v) => usePlayer.getState().setVolume(v));
   }, [init, playerInit]);
 
   function applyBrightness(v: number) {
-    const val = Math.min(1, Math.max(0.3, v));
-    setBrightness(val);
-    setSetting('brightness', val);
+    void setBrightnessLevel(v).then(setBrightness);
   }
+
+  // 监听系统音量变化（硬件按键 / 系统面板），保持界面显示与实际一致
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    void watchVolume((v) => usePlayer.getState().setVolume(v)).then((fn) => {
+      stop = fn;
+    });
+    return () => stop?.();
+  }, []);
 
   // 卸载时清理 timer
   useEffect(() => {
@@ -113,6 +129,13 @@ export function App() {
         const s = useAuth.getState();
         if (!s.user) void s.bootstrap();
       }, 300);
+      // 回到前台时重新对齐系统亮度 / 音量（期间可能用硬件按键改过）
+      if (NATIVE) {
+        window.setTimeout(() => {
+          void readBrightness().then(setBrightness);
+          void readVolume().then((v) => usePlayer.getState().setVolume(v));
+        }, 200);
+      }
     })
       .then((h) => {
         handle = h;
@@ -370,7 +393,7 @@ export function App() {
               if (quick.adjusting === 'bright') {
                 applyBrightness(brightness + d * 0.05);
               } else if (quick.adjusting === 'vol') {
-                usePlayer.getState().setVolume(volume + d * 0.05);
+                void setVolumeLevel(volume + d * 0.05);
               } else {
                 setQuick((q) => ({
                   ...q,
@@ -386,7 +409,8 @@ export function App() {
         />
       }
     >
-      <ScreenShell title={title} brightness={brightness}>
+      {/* 原生端亮度由系统背光控制，不再叠加 CSS 滤镜（避免双重变暗） */}
+      <ScreenShell title={title} brightness={NATIVE ? 1 : brightness}>
         {renderBody()}
         <QuickPanel
           open={quick.open}
