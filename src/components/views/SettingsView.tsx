@@ -1,16 +1,18 @@
 // ============================================================
 // SettingsView - 设置（文档 4.4）
-// 触感、播放选项、音效、曲库管理、导入歌曲、关于
-// 所有开关实时反映状态，SELECT 循环切换
+// 导入、主页布局、触感、选择音效、播放选项、音效、音量、网易云 API、曲库管理、关于
+// 动作通过 label 分派（而非下标），新增条目不会打乱既有行为
 // ============================================================
 
 import { useEffect, useRef } from 'react';
 import { useLibrary } from '@/stores/library';
 import { usePlayer, EQ_LABELS, EQ_ORDER } from '@/stores/player';
 import { useNavigation } from '@/stores/navigation';
+import { usePrefs } from '@/stores/prefs';
 import { ListMenu } from '@/components/ui/ListMenu';
 import { clearAll } from '@/services/storage';
 import { setVolumeLevel } from '@/services/system';
+import { playTick } from '@/services/sound';
 
 export function SettingsView() {
   const tracks = useLibrary((s) => s.tracks);
@@ -24,54 +26,94 @@ export function SettingsView() {
   const setItems = useNavigation((s) => s.setItems);
   const items = useNavigation((s) => s.items);
   const selectedIndex = useNavigation((s) => s.selectedIndex);
+  const setIndex = useNavigation((s) => s.setIndex);
+  const push = useNavigation((s) => s.push);
+
+  const homeLayout = usePrefs((s) => s.homeLayout);
+  const haptics = usePrefs((s) => s.haptics);
+  const soundFeedback = usePrefs((s) => s.soundFeedback);
+  const update = usePrefs((s) => s.update);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setItems([
-      { kind: 'action', label: '导入歌曲…', meta: importing ? `${importing.done}/${importing.total}` : '' },
-      { kind: 'toggle', label: '触感反馈', value: true },
+      {
+        kind: 'action',
+        label: '导入歌曲…',
+        meta: importing ? `${importing.done}/${importing.total}` : '',
+      },
+      { kind: 'action', label: '主页布局', meta: homeLayout === 'list' ? '列表' : '网格' },
+      { kind: 'toggle', label: '触感反馈', value: haptics },
+      { kind: 'toggle', label: '选择音效', value: soundFeedback },
       { kind: 'toggle', label: '随机播放', value: shuffle === 'on' },
       { kind: 'action', label: '循环模式', meta: repeatLabel(repeat) },
       { kind: 'action', label: '音效', meta: EQ_LABELS[eq] },
       { kind: 'action', label: '音量', meta: `${Math.round(volume * 100)}%` },
+      { kind: 'action', label: '网易云 API 地址' },
       { kind: 'title', label: `曲库：${tracks.length} 首` },
       { kind: 'title', label: `歌单：${Object.keys(playlists).length} 个` },
       { kind: 'action', label: '清空曲库', meta: '⚠' },
       { kind: 'title', label: '关于' },
       { kind: 'title', label: 'iPodPlayer v0.1 · 自用版' },
     ]);
-  }, [tracks.length, playlists, importing, shuffle, repeat, volume, eq, setItems]);
+  }, [
+    tracks.length,
+    playlists,
+    importing,
+    shuffle,
+    repeat,
+    volume,
+    eq,
+    homeLayout,
+    haptics,
+    soundFeedback,
+    setItems,
+  ]);
 
   useEffect(() => {
-    (SettingsView as any).__action = async (idx: number) => {
+    (SettingsView as any).__action = async (label: string) => {
       const p = usePlayer.getState();
-      switch (idx) {
-        case 0:
+      switch (label) {
+        case '导入歌曲…':
           fileInputRef.current?.click();
-          return 'open-import';
-        case 2:
-          p.toggleShuffle();
-          return 'rerender';
-        case 3:
-          p.cycleRepeat();
-          return 'rerender';
-        case 4: {
-          const next = EQ_ORDER[(EQ_ORDER.indexOf(p.eq) + 1) % EQ_ORDER.length];
-          p.setEq(next);
-          return 'rerender';
+          return;
+        case '主页布局':
+          update('homeLayout', homeLayout === 'list' ? 'grid' : 'list');
+          return;
+        case '触感反馈':
+          update('haptics', !haptics);
+          return;
+        case '选择音效': {
+          const next = !soundFeedback;
+          update('soundFeedback', next);
+          if (next) playTick('select'); // 开启时立刻听到一次
+          return;
         }
-        case 5:
+        case '随机播放':
+          p.toggleShuffle();
+          return;
+        case '循环模式':
+          p.cycleRepeat();
+          return;
+        case '音效':
+          p.setEq(EQ_ORDER[(EQ_ORDER.indexOf(p.eq) + 1) % EQ_ORDER.length]);
+          return;
+        case '音量':
           void setVolumeLevel(p.volume >= 0.999 ? 0 : Math.min(1, p.volume + 0.1));
-          return 'rerender';
-        case 8:
+          return;
+        case '网易云 API 地址':
+          push({ name: 'settings.netease' });
+          return;
+        case '清空曲库':
           if (confirm('确认清空曲库？此操作不可撤销。')) {
             await clearAll();
             window.location.reload();
           }
-          return 'rerender';
+          return;
       }
     };
-  }, []);
+  }, [homeLayout, haptics, soundFeedback, update, push]);
 
   return (
     <>
@@ -88,7 +130,14 @@ export function SettingsView() {
           }
         }}
       />
-      <ListMenu items={items} selectedIndex={selectedIndex} />
+      <ListMenu
+        items={items}
+        selectedIndex={selectedIndex}
+        onPick={(i) => {
+          setIndex(i);
+          settingsAction(items[i]?.label);
+        }}
+      />
     </>
   );
 }
@@ -97,6 +146,6 @@ function repeatLabel(r: 'off' | 'all' | 'one'): string {
   return r === 'off' ? '关' : r === 'all' ? '全部' : '单曲';
 }
 
-export function settingsAction(idx: number) {
-  return (SettingsView as any).__action?.(idx);
+export function settingsAction(label?: string) {
+  return (SettingsView as any).__action?.(label);
 }
