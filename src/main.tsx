@@ -35,6 +35,7 @@ import {
   NeteasePlaylistsView,
   NeteasePlaylistView,
   selectNeteasePlaylistItem,
+  playSelectedPlaylistTrack,
   playNeteaseSongAt,
 } from '@/components/views/NeteaseView';
 import { useAuth } from '@/stores/auth';
@@ -290,7 +291,7 @@ export function App() {
             } else if (item.label === '重试连接') {
               useAuth.getState().bootstrap();
             } else {
-              useAuth.getState().startLogin();
+              useAuth.getState().primaryAction();
             }
           }
         }
@@ -299,7 +300,7 @@ export function App() {
         selectNeteasePlaylistItem(selectedIndex);
         return;
       case 'netease.playlist':
-        if (item.kind === 'track') playNeteaseSongAt(selectedIndex);
+        playSelectedPlaylistTrack(selectedIndex);
         return;
     }
   }
@@ -410,7 +411,7 @@ export function App() {
       }
     >
       {/* 原生端亮度由系统背光控制，不再叠加 CSS 滤镜（避免双重变暗） */}
-      <ScreenShell title={title} brightness={NATIVE ? 1 : brightness}>
+      <ScreenShell title={title} brightness={NATIVE ? 1 : brightness} hideStatusbar={current.name === 'now-playing'}>
         {renderBody()}
         <QuickPanel
           open={quick.open}
