@@ -2,14 +2,22 @@
 // 网易云相关界面
 // - NeteaseLoginView：手机号 + 短信验证码登录（替代扫码）
 // - NeteasePlaylistsView / NeteasePlaylistView：歌单与播放
+// 请求统一走 services/netease 的 call()（自动带登录 cookie）；
+// 歌曲一律保留接口原始字段（name/ar/al/dt），player 依赖这些字段
 // ============================================================
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/stores/auth';
 import { useNavigation } from '@/stores/navigation';
 import { usePlayer } from '@/stores/player';
+import { ListMenu } from '@/components/ui/ListMenu';
+import {
+  fetchUserPlaylists,
+  fetchPlaylistDetail,
+  rememberNeteaseTracks,
+  type NetEaseTrack,
+} from '@/services/netease';
 import type { MenuItem } from '@/types';
-import { NETEASE_BASES } from '@/services/netease';
 
 export interface NeteaseViewProps {
   playlistId?: number;
@@ -19,23 +27,24 @@ export interface NeteaseViewProps {
 let cachedPlaylists: any[] = [];
 let cachedPlaylist: any = null;
 
-function toNeteaseTrack(t: any) {
-  return {
-    id: `netease:${t.id}`,
-    title: t.name,
-    artist: (t.ar || t.artists || []).map((a: any) => a.name).join('/') || '未知艺人',
-    album: (t.al && t.al.name) || '未知专辑',
-    artworkUrl: t.al && t.al.picUrl ? `${t.al.picUrl}?param=300y300` : undefined,
-    duration: Math.floor((t.dt || 0) / 1000),
-  };
+function trackLabel(t: any): string {
+  return t?.name ?? '未知歌曲';
 }
 
-// 播放歌单中的某一首（纯播放，不改写曲库）
+function trackMeta(t: any): string {
+  return (t?.ar || t?.artists || []).map((a: any) => a.name).join('/') || '未知艺人';
+}
+
+/**
+ * 播放歌单中的某一首。
+ * 必须传原始 NetEaseTrack：player.playNeteaseTrack 读的是 name/ar/al/dt
+ */
 export function playNeteaseSongAt(playlist: any, idx: number) {
-  const tracks = (playlist.tracks || []).map(toNeteaseTrack);
+  const tracks: NetEaseTrack[] = playlist?.tracks ?? [];
   const t = tracks[idx];
   if (!t) return;
-  usePlayer.getState().playNeteaseTrack(t, tracks);
+  rememberNeteaseTracks(tracks); // 注册进查表，next()/previous() 才能还原曲目
+  void usePlayer.getState().playNeteaseTrack(t, tracks);
 }
 
 export function NeteaseLoginView() {
@@ -93,15 +102,23 @@ export function NeteaseLoginView() {
 
   if (!apiOnline) {
     return (
-      <div className="text-center mt-6 px-3">
+      <div className="text-center mt-5 px-3">
         <div className="text-[13px] font-bold mb-2" style={{ color: 'var(--screen-text-primary)' }}>
           无法连接网易云 API
         </div>
-        <div className="text-[11px] leading-relaxed mb-2" style={{ color: 'var(--screen-text-secondary)' }}>
+        <div
+          className="text-[10px] leading-relaxed mb-2 break-all"
+          style={{ color: 'var(--screen-text-secondary)' }}
+        >
           {errorMessage}
         </div>
         <div className="text-[10px]" style={{ color: 'var(--screen-text-muted)' }}>
           按 SELECT 重试连接
+        </div>
+        <div className="text-[9px] mt-3 leading-relaxed" style={{ color: 'var(--screen-text-muted)' }}>
+          内置地址为 Vercel 托管，手机网络常不可达。
+          <br />
+          到「设置 → 网易云 API 地址」可填自建地址。
         </div>
       </div>
     );
@@ -157,7 +174,10 @@ export function NeteaseLoginView() {
       </div>
 
       {loginDebug ? (
-        <div className="mt-2 px-2 text-[9px] whitespace-pre-wrap break-all text-center" style={{ color: 'var(--screen-text-muted)' }}>
+        <div
+          className="mt-2 px-2 text-[9px] whitespace-pre-wrap break-all text-center"
+          style={{ color: 'var(--screen-text-muted)' }}
+        >
           [debug] {loginDebug}
         </div>
       ) : null}
@@ -167,49 +187,44 @@ export function NeteaseLoginView() {
 
 export function NeteasePlaylistsView() {
   const user = useAuth((s) => s.user);
-  const push = useNavigation((s) => s.push);
   const setItems = useNavigation((s) => s.setItems);
+  const selectedIndex = useNavigation((s) => s.selectedIndex);
+  const setIndex = useNavigation((s) => s.setIndex);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [playlists, setPlaylists] = useState<any[]>([]);
 
+  const listItems = useMemo<MenuItem[]>(
+    () =>
+      playlists.map((p) => ({
+        kind: 'submenu' as const,
+        label: p.name,
+        meta: `${p.trackCount || 0} 首`,
+      })),
+    [playlists],
+  );
+
   const load = async () => {
+    if (!user) return;
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(
-        `${NETEASE_BASES[0]}/user/playlist?uid=${user?.account.id}&timestamp=${Date.now()}`,
-        { credentials: 'include' },
-      );
-      const data = await res.json();
-      if (data.code === 200) {
-        setPlaylists(data.playlist || []);
-      } else {
-        setError(data.message || `加载失败（code=${data.code}）`);
-      }
+      setPlaylists(await fetchUserPlaylists(user.account.id));
     } catch (e: any) {
-      setError(String(e));
-      useAuth.getState().refreshAccount();
+      setError(String(e?.message ?? e));
     }
     setLoading(false);
   };
 
   useEffect(() => {
-    if (user) load();
+    void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   useEffect(() => {
     cachedPlaylists = playlists;
-    setItems(
-      playlists.map((p) => ({
-        kind: 'submenu' as const,
-        label: p.name,
-        meta: `${(p.trackCount || 0)} 首`,
-      })) as MenuItem[],
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playlists]);
+    setItems(listItems);
+  }, [listItems, setItems]);
 
   if (loading) {
     return (
@@ -225,54 +240,81 @@ export function NeteasePlaylistsView() {
         <div className="text-[11px] mb-2" style={{ color: 'var(--screen-text-primary)' }}>
           加载失败
         </div>
-        <div className="text-[10px] mb-2" style={{ color: 'var(--screen-text-secondary)' }}>
+        <div className="text-[10px] mb-2 break-all" style={{ color: 'var(--screen-text-secondary)' }}>
           {error}
         </div>
-        <button className="np-btn" onClick={load}>
+        <button className="np-btn" onClick={() => void load()}>
           重试
         </button>
       </div>
     );
   }
 
-  return (
-    <div className="px-3 pt-2">
-      <div className="text-[10px] mb-1" style={{ color: 'var(--screen-text-muted)' }}>
-        共 {playlists.length} 个歌单
+  if (playlists.length === 0) {
+    return (
+      <div className="text-center mt-6 px-3">
+        <div className="text-[10px] leading-relaxed" style={{ color: 'var(--screen-text-secondary)' }}>
+          没拿到歌单：登录可能已失效，或该账号暂无歌单
+        </div>
+        <button className="np-btn" onClick={() => void load()}>
+          重试
+        </button>
+        <button className="np-btn" onClick={() => useAuth.getState().logout()}>
+          退出登录
+        </button>
       </div>
-      <button className="np-btn" onClick={() => useAuth.getState().logout()}>
-        退出登录
-      </button>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex-1 min-h-0">
+        <ListMenu
+          items={listItems}
+          selectedIndex={selectedIndex}
+          onPick={(i) => {
+            setIndex(i);
+            selectNeteasePlaylistItem(i);
+          }}
+        />
+      </div>
+      <div className="px-3 pb-2">
+        <button className="np-btn" onClick={() => useAuth.getState().logout()}>
+          退出登录
+        </button>
+      </div>
     </div>
   );
 }
 
 export function NeteasePlaylistView({ playlistId }: NeteaseViewProps) {
   const selectedIndex = useNavigation((s) => s.selectedIndex);
-  const push = useNavigation((s) => s.push);
+  const setIndex = useNavigation((s) => s.setIndex);
   const setItems = useNavigation((s) => s.setItems);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [playlist, setPlaylist] = useState<any>(null);
+
+  const listItems = useMemo<MenuItem[]>(
+    () =>
+      (playlist?.tracks ?? []).map((t: any) => ({
+        kind: 'action' as const,
+        label: trackLabel(t),
+        meta: trackMeta(t),
+      })),
+    [playlist],
+  );
 
   const load = async () => {
     if (playlistId == null) return;
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(
-        `${NETEASE_BASES[0]}/playlist/detail?id=${playlistId}&timestamp=${Date.now()}`,
-        { credentials: 'include' },
-      );
-      const data = await res.json();
-      if (data.code === 200) {
-        const tracks = (data.playlist.tracks || []).map(toNeteaseTrack);
-        setPlaylist({ ...data.playlist, tracks });
-      } else {
-        setError(data.message || `加载失败（code=${data.code}）`);
-      }
+      const detail = await fetchPlaylistDetail(playlistId);
+      // 保留原始字段，交给 playNeteaseTrack
+      setPlaylist({ ...detail.playlist, tracks: detail.tracks || [] });
     } catch (e: any) {
-      setError(String(e));
+      setError(String(e?.message ?? e));
     }
     setLoading(false);
   };
@@ -285,16 +327,8 @@ export function NeteasePlaylistView({ playlistId }: NeteaseViewProps) {
   useEffect(() => {
     if (!playlist) return;
     cachedPlaylist = playlist;
-    setItems(
-      playlist.tracks.map((t: any) => ({
-        kind: 'action' as const,
-        label: t.title,
-        meta: t.artist,
-        disabled: false,
-      })) as MenuItem[],
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playlist]);
+    setItems(listItems);
+  }, [playlist, listItems, setItems]);
 
   if (loading) {
     return (
@@ -310,7 +344,7 @@ export function NeteasePlaylistView({ playlistId }: NeteaseViewProps) {
         <div className="text-[11px] mb-2" style={{ color: 'var(--screen-text-primary)' }}>
           加载失败
         </div>
-        <div className="text-[10px] mb-2" style={{ color: 'var(--screen-text-secondary)' }}>
+        <div className="text-[10px] mb-2 break-all" style={{ color: 'var(--screen-text-secondary)' }}>
           {error}
         </div>
         <button className="np-btn" onClick={() => void load()}>
@@ -323,35 +357,38 @@ export function NeteasePlaylistView({ playlistId }: NeteaseViewProps) {
   if (!playlist) return null;
 
   return (
-    <div className="px-3 pt-2">
-      <div className="flex items-center gap-2 mb-2">
+    <div className="h-full flex flex-col">
+      <div className="flex items-center gap-2 px-3 pt-1 pb-1">
         {playlist.coverImgUrl ? (
           <img
             src={`${playlist.coverImgUrl}?param=96y96`}
-            className="w-12 h-12 rounded-lg"
+            className="w-9 h-9 rounded-md"
             alt="cover"
           />
         ) : null}
-        <div className="min-w-0">
-          <div className="text-[12px] font-bold truncate" style={{ color: 'var(--screen-text-primary)' }}>
+        <div className="min-w-0 flex-1">
+          <div
+            className="text-[11px] font-bold truncate"
+            style={{ color: 'var(--screen-text-primary)' }}
+          >
             {playlist.name}
           </div>
-          <div className="text-[10px]" style={{ color: 'var(--screen-text-muted)' }}>
-            {playlist.tracks.length} 首
+          <div className="text-[9px]" style={{ color: 'var(--screen-text-muted)' }}>
+            {playlist.tracks.length} 首 · 点按播放
           </div>
         </div>
       </div>
-      <div className="text-[10px] mb-2" style={{ color: 'var(--screen-text-muted)' }}>
-        滚动选择歌曲，按 SELECT 播放
+
+      <div className="flex-1 min-h-0">
+        <ListMenu
+          items={listItems}
+          selectedIndex={selectedIndex}
+          onPick={(i) => {
+            setIndex(i);
+            playNeteaseSongAt(playlist, i);
+          }}
+        />
       </div>
-      {playlist.tracks[selectedIndex] ? (
-        <button
-          className="np-btn"
-          onClick={() => playNeteaseSongAt(playlist, selectedIndex)}
-        >
-          播放选中
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -361,7 +398,7 @@ export function selectNeteasePlaylistItem(index: number) {
   if (p) useNavigation.getState().push({ name: 'netease.playlist', playlistId: p.id });
 }
 
-/** 在当前歌单内播放指定索引（供轮盘 SELECT 与「播放选中」按钮共用） */
+/** 在当前歌单内播放指定索引（供轮盘 SELECT 与列表点按共用） */
 export function playSelectedPlaylistTrack(index: number) {
   if (cachedPlaylist) playNeteaseSongAt(cachedPlaylist, index);
 }
