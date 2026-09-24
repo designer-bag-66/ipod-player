@@ -2,12 +2,14 @@
 // HomeView - 主页菜单
 // 音乐资料 / 歌单（网易云） / 专辑 / 我喜欢的（网易云） / 搜索 / 设置
 // 两种呈现：图标网格（grid）/ 列表（list），由设置里的「主页布局」切换
+// 列表字号 / 上下位置由「列表字号 / 列表位置」调节
 // ============================================================
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useAuth } from '@/stores/auth';
 import { useNavigation } from '@/stores/navigation';
-import { usePrefs } from '@/stores/prefs';
+import { usePlayer } from '@/stores/player';
+import { HOME_LIST_GAP, HOME_LIST_SIZE, usePrefs } from '@/stores/prefs';
 import { ListMenu } from '@/components/ui/ListMenu';
 import type { MenuItem, Screen } from '@/types';
 
@@ -30,7 +32,17 @@ export function HomeView({ onPick }: Props) {
   const homeIndex = useNavigation((s) => s.homeIndex);
   const setHomeIndex = useNavigation((s) => s.setHomeIndex);
   const push = useNavigation((s) => s.push);
+  const currentTrack = usePlayer((s) => s.currentTrack);
+
   const homeLayout = usePrefs((s) => s.homeLayout);
+  const homeListSize = usePrefs((s) => s.homeListSize);
+  const homeListPos = usePrefs((s) => s.homeListPos);
+
+  const listRef = useRef<HTMLDivElement>(null);
+  /** 底部正在播放卡片占掉的高度，避免最后一行被压住 */
+  const [bottomClearance, setBottomClearance] = useState(0);
+  /** 列表整体上边距（按「列表位置」算出） */
+  const [padTop, setPadTop] = useState(0);
 
   const ICONS = useMemo<IconItem[]>(() => {
     const favId = neUser?.account.id;
@@ -76,6 +88,48 @@ export function HomeView({ onPick }: Props) {
     setHomeIndex(selectedIndex);
   }, [selectedIndex, setHomeIndex]);
 
+  // 量出底部「正在播放」卡片的高度：卡片是浮层，不避让就会盖住最后一项
+  useEffect(() => {
+    let ro: ResizeObserver | undefined;
+    const measure = () => {
+      const card = document.querySelector('.nowplaying-card') as HTMLElement | null;
+      const area = (card?.offsetParent as HTMLElement | null) ?? null;
+      if (!card || !area) {
+        setBottomClearance(0);
+        return;
+      }
+      const gap = area.getBoundingClientRect().bottom - card.getBoundingClientRect().top + 8;
+      setBottomClearance(Math.max(0, Math.round(gap)));
+    };
+    const raf = requestAnimationFrame(() => {
+      measure();
+      const card = document.querySelector('.nowplaying-card');
+      if (card && typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(measure);
+        ro.observe(card);
+      }
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      ro?.disconnect();
+    };
+  }, [currentTrack]);
+
+  // 根据可视高度与内容高度，把整列推到「偏上 / 居中 / 偏下」
+  // 内容高度用「行高 + 行距」常数算，不读 DOM，避免 padding 自我放大
+  useEffect(() => {
+    if (homeLayout !== 'list') return;
+    const scroller = listRef.current?.querySelector('.list-scroll') as HTMLElement | null;
+    if (!scroller) return;
+    const { row } = HOME_LIST_SIZE[homeListSize];
+    // flex gap 只出现在行与行之间，末行后面没有
+    const contentH = listItems.length * row + Math.max(0, listItems.length - 1) * HOME_LIST_GAP;
+    const free = scroller.clientHeight - contentH;
+    const next =
+      homeListPos === 'top' ? 0 : homeListPos === 'mid' ? Math.round(free / 2) : Math.round(free);
+    setPadTop(Math.max(0, next));
+  }, [homeLayout, homeListSize, homeListPos, listItems.length, bottomClearance]);
+
   const pick = (i: number) => {
     setIndex(i);
     if (onPick) {
@@ -86,8 +140,20 @@ export function HomeView({ onPick }: Props) {
     if (target) push(target);
   };
 
+  const spec = HOME_LIST_SIZE[homeListSize];
+  const listVars = {
+    '--hl-row': `${spec.row}px`,
+    '--hl-font': `${spec.font}px`,
+    '--hl-radius': `${spec.radius}px`,
+    '--hl-gap': `${HOME_LIST_GAP}px`,
+    '--hl-pad-top': `${padTop}px`,
+  } as CSSProperties;
+
   return (
-    <div className="h-full flex flex-col z-10 relative">
+    <div
+      className="h-full flex flex-col z-10 relative"
+      style={{ paddingBottom: bottomClearance || undefined }}
+    >
       <div className="text-center mt-1 mb-1 z-10">
         <h1
           className="text-[15px] font-extrabold tracking-wide"
@@ -104,7 +170,7 @@ export function HomeView({ onPick }: Props) {
       </div>
 
       {homeLayout === 'list' ? (
-        <div className="home-list flex-1 min-h-0">
+        <div ref={listRef} className="home-list flex-1 min-h-0" style={listVars}>
           <ListMenu
             items={listItems}
             selectedIndex={selectedIndex}
