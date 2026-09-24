@@ -228,8 +228,32 @@ body {
 }
 
 /* ---------- 主页列表布局 ---------- */
+/* 行高 / 字号 / 圆角 / 行距 / 上边距 由「设置 → 列表字号 / 列表位置」注入 CSS 变量 */
 .home-list {
-  padding: 0 4px 10px;
+  --hl-row: 46px;
+  --hl-font: 15px;
+  --hl-radius: 15px;
+  --hl-gap: 2px;
+  --hl-pad-top: 0px;
+  padding: 0 4px 0;
+}
+
+/* 用 flex gap 而不是 margin：避免相邻行 margin 塌陷导致行距不可预测 */
+.home-list .list-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hl-gap);
+  padding-top: var(--hl-pad-top);
+  padding-bottom: 2px;
+}
+
+/* 覆盖 .list-row 的固定尺寸（选择器权重更高） */
+.home-list .list-row {
+  height: var(--hl-row);
+  font-size: var(--hl-font);
+  border-radius: var(--hl-radius);
+  margin: 0;
+  flex: 0 0 auto;
 }
 
 /* 列表行可点按（触摸设备） */
