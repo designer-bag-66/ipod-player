@@ -68,10 +68,12 @@ export async function setVolumeLevel(v: number): Promise<number> {
     try {
       await VolumeControl.setVolumeLevel({ value: val });
     } catch {
-      /* 忽略 */
+      /* 忽略：iOS 不允许直接改系统音量，交给下面的增益兜底 */
     }
   }
-  usePlayer.getState().setVolume(val);
+  // iOS 上 <audio>.volume 不可写、系统音量也改不了，
+  // 走 Web Audio 增益才能真正改变输出音量
+  usePlayer.getState().setVolumeWithGain(val);
   return val;
 }
 
