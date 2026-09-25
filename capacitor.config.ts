@@ -17,10 +17,10 @@ const config: CapacitorConfig = {
       enabled: true,
     },
     StatusBar: {
-      // 沉浸到 iPod 屏幕内
+      // 不覆盖 WebView：界面从状态栏/灵动岛下方开始，避免被压住
       style: 'DARK',
       backgroundColor: '#000000',
-      overlaysWebView: true,
+      overlaysWebView: false,
     },
   },
 };
