@@ -69,14 +69,7 @@ export function Screen({ title, rightSlot, brightness = 1, hideStatusbar, childr
               </span>
             )}
           </div>
-          <div
-            className="flex-1 relative overflow-hidden"
-            style={
-              hideStatusbar
-                ? { paddingTop: 'env(safe-area-inset-top)' }
-                : undefined
-            }
-          >
+          <div className="flex-1 relative overflow-hidden">
             {children}
             <NowPlayingBar />
           </div>
