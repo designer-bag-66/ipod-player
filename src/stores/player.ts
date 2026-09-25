@@ -35,7 +35,71 @@ interface PlayerStore extends PlayerState {
   cycleRepeat(): void;
   toggleShuffle(): void;
   setVolume(v: number): void;
+  /** 用户手动调节音量：真正改变输出音量（Web Audio 增益 + 系统音量） */
+  setVolumeWithGain(v: number): void;
+  /** 在用户手势中解锁音频元素（iOS 首次必须手势触发才能后续自动播放） */
+  unlock(): void;
   teardown(): void;
+}
+
+// ---------------- 音频增益（音量真正生效） ----------------
+// iOS 不允许 JS 改 <audio>.volume，系统音量也无法直接写入，
+// 因此这里用 Web Audio 的 GainNode 控制实际输出音量。
+// 只有在「用户手动调节音量」时才创建（必须在手势中），并带自检：
+// 若接入后音频没有推进（跨域被静音等），自动旁路还原直连，避免没声音。
+
+let audioCtx: AudioContext | null = null;
+let audioSource: MediaElementAudioSourceNode | null = null;
+let audioGain: GainNode | null = null;
+let audioGraphBypass = false;
+let unlocked = false;
+
+/** 1 帧静音 wav（用于 iOS 手势解锁） */
+const SILENT_WAV =
+  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
+function ensureAudioGraph(audio: HTMLAudioElement): boolean {
+  if (audioGraphBypass) return false;
+  if (audioGain) {
+    if (audioCtx && audioCtx.state === 'suspended') void audioCtx.resume().catch(() => {});
+    return true;
+  }
+  try {
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return false;
+    const ctx: AudioContext = new Ctx();
+    const src = ctx.createMediaElementSource(audio);
+    const gain = ctx.createGain();
+    gain.gain.value = usePlayer.getState().volume;
+    src.connect(gain);
+    gain.connect(ctx.destination);
+    if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+    audioCtx = ctx;
+    audioSource = src;
+    audioGain = gain;
+
+    // 自检：接入后若音频被静音（跨域资源），还原为直连输出
+    window.setTimeout(() => {
+      const t0 = audio.currentTime;
+      window.setTimeout(() => {
+        if (audioGraphBypass || !audioSource || !audioCtx) return;
+        const progressing = !audio.paused && !audio.ended && audio.currentTime > t0 + 0.2;
+        if (!progressing && audio.readyState >= 2) {
+          try {
+            audioSource.disconnect();
+            audioSource.connect(audioCtx.destination);
+          } catch {}
+          audioGraphBypass = true;
+          console.warn('[player] Web Audio 增益已旁路还原（避免静音）');
+        }
+      }, 1600);
+    }, 2500);
+    return true;
+  } catch (err) {
+    console.warn('[player] 音频增益初始化失败', err);
+    audioGraphBypass = true;
+    return false;
+  }
 }
 
 function setupMediaSession() {
@@ -132,7 +196,16 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
         audio.play().catch(console.error);
         return;
       }
-      s.next();
+      void s.next().then(() => {
+        // 兜底：若自动切歌后没有真正播起来（iOS 手势限制 / 网络抖动），
+        // 稍等一下再尝试一次，避免「播完一首就停」
+        window.setTimeout(() => {
+          const cur = get();
+          if (cur.status !== 'playing' && cur.currentTrack) {
+            void cur.next();
+          }
+        }, 1500);
+      });
     });
 
     audio.addEventListener('timeupdate', () => {
@@ -161,14 +234,18 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
     }
 
     const neId = Number(track.id.slice(8));
+    // 依次尝试高/中/低码率：高码率拿不到地址（版权/会员）时还能出声
     let item: SongUrlItem | null = null;
-    try {
-      item = await fetchSongUrl(neId, 320000);
-    } catch (err) {
-      // 网络/API 不可达：以前这里会直接抛出去，把调用方的后续流程一起打断
-      console.warn('[player] netease song url failed', neId, err);
-      set({ status: 'error' });
-      return;
+    for (const br of [320000, 192000, 128000]) {
+      try {
+        const got = await fetchSongUrl(neId, br);
+        if (got?.url) {
+          item = got;
+          break;
+        }
+      } catch (err) {
+        console.warn('[player] netease song url failed', neId, br, err);
+      }
     }
     if (!item?.url) {
       console.warn('[player] netease track no url (VIP?)', neId);
@@ -230,8 +307,9 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
   },
 
   async toggle() {
-    const { status } = get();
-    if (status === 'playing') return get().pause();
+    // 以 audio 元素的真实状态为准：status 可能卡在 loading/error 上
+    const { audio, status } = get();
+    if (!audio.paused && status !== 'paused') return get().pause();
     return get().play();
   },
 
@@ -332,8 +410,45 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
   setVolume(v) {
     const vol = Math.min(1, Math.max(0, v));
     get().audio.volume = vol;
+    if (audioGain) {
+      try {
+        audioGain.gain.value = vol;
+      } catch {}
+    }
     set({ volume: vol });
     setSetting('volume', vol);
+  },
+
+  setVolumeWithGain(v) {
+    const audio = get().audio;
+    ensureAudioGraph(audio);
+    get().setVolume(Math.min(1, Math.max(0, v)));
+  },
+
+  unlock() {
+    // iOS：首次必须在用户手势里播一次，之后才允许自动续播
+    const { audio } = get();
+    if (unlocked) return;
+    unlocked = true;
+    try {
+      const prevSrc = audio.src;
+      const prevTime = audio.currentTime;
+      const wasPaused = audio.paused;
+      audio.src = SILENT_WAV;
+      const p = audio.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => {
+          audio.pause();
+          if (prevSrc) {
+            audio.src = prevSrc;
+            audio.currentTime = prevTime;
+            if (!wasPaused) void audio.play().catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    } catch {
+      /* 忽略：解锁失败不影响其它功能 */
+    }
   },
 
   teardown() {
