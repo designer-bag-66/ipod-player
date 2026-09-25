@@ -111,7 +111,8 @@ const DEFAULTS: PrefsValues = {
   haptics: 'mid',
   soundFeedback: 'mid',
   screenW: 100,
-  screenH: 432,
+  /** 0 = 自动铺满（占满安全区以外的全部空间）；>0 = 固定像素高 */
+  screenH: 0,
   screenDy: 0,
   wheelSize: 90,
   wheelDy: 0,
@@ -147,6 +148,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
 
   init() {
     const saved = readStorage();
+    // 旧版默认 screenH=432（固定高，手机上下会留黑边），迁移为 0=自动铺满
+    if (saved.screenH === 432) saved.screenH = 0;
     set({
       ...DEFAULTS,
       ...saved,
