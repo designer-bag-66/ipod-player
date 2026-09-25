@@ -206,12 +206,70 @@ function isFresh(key: string): boolean {
 
 function putCache(key: string, data: unknown): void {
   memo.set(key, { at: Date.now(), data });
+  persistCacheSoon();
+}
+
+// ---------------- 缓存持久化 ----------------
+// 只放内存的话 App 重启（或切后台被回收）后又要重新等一次网络。
+// 这里把歌单列表 / 歌单详情 / 收藏写进原生存储，启动时回填，做到「秒开」。
+
+const PERSIST_KEY = 'ne_cache_v1';
+const PERSIST_LIMIT = 1_500_000; // 约 1.5MB，超出则丢弃较旧的详情
+let persistTimer: number | null = null;
+let cacheHydrated = false;
+
+/** 启动时把上次的缓存读回内存（失效与否交给 TTL/SWR 判断，旧数据也能先顶上） */
+export async function hydrateNeteaseCache(): Promise<void> {
+  if (cacheHydrated) return;
+  cacheHydrated = true;
+  try {
+    const raw = await prefGet(PERSIST_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw) as Record<string, CacheEntry>;
+    for (const [k, v] of Object.entries(obj)) {
+      if (v && typeof v.at === 'number' && 'data' in v) memo.set(k, v);
+    }
+  } catch (err) {
+    console.warn('[netease] 缓存回填失败', err);
+  }
+}
+
+function persistCacheSoon(): void {
+  if (persistTimer !== null) return;
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null;
+    void persistCache();
+  }, 800);
+}
+
+async function persistCache(): Promise<void> {
+  try {
+    const entries = [...memo.entries()]
+      .filter(
+        ([k]) =>
+          k.startsWith('playlists:') || k.startsWith('playlist:') || k.startsWith('liked:'),
+      )
+      .sort((a, b) => b[1].at - a[1].at);
+
+    const out: Record<string, CacheEntry> = {};
+    let size = 0;
+    for (const [k, v] of entries) {
+      const s = JSON.stringify(v).length;
+      if (size + s > PERSIST_LIMIT) continue; // 体积超了就跳过更旧的
+      out[k] = v;
+      size += s;
+    }
+    await prefSet(PERSIST_KEY, JSON.stringify(out));
+  } catch (err) {
+    console.warn('[netease] 缓存持久化失败', err);
+  }
 }
 
 /** 登录态变化时整体失效 */
 export function clearNeteaseCache(): void {
   memo.clear();
   inflight.clear();
+  void prefRemove(PERSIST_KEY);
 }
 
 /** 同一个 key 的并发请求合并成一次 */
