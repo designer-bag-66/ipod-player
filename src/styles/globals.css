@@ -129,11 +129,9 @@ body {
    --wheel-max   滚轮高度上限（vh 数值）
    --wheel-mb    滚轮下边距                                          */
 .ipod-shell {
-  width: min(var(--shell-max, 480px), calc(var(--shell-w, 100) * 1vw));
-  height: 100%;
+  width: min(var(--shell-max, 420px), calc(var(--shell-w, 92) * 1vw));
   margin: 0 auto;
-  /* 全屏：上下不再留黑边（安全区由滚轮容器与屏幕内部处理） */
-  padding: 0 var(--shell-pad, 6px);
+  padding: var(--shell-pad, clamp(8px, 2vw, 15px));
   background: var(--shell-bg, #000000);
   display: flex;
   flex-direction: column;
@@ -141,14 +139,6 @@ body {
   gap: var(--screen-gap, clamp(8px, 1.8vw, 17px));
   box-sizing: border-box;
   overflow: hidden;
-}
-
-/* 自动铺满模式：显示框占满滚轮以外的全部高度 */
-.ipod-shell.screen-fill .screen-bezel {
-  height: auto;
-  flex: 1 1 auto;
-  min-height: 0;
-  aspect-ratio: auto;
 }
 
 /* 进入主页：屏幕缩小 + 模糊淡出 */
@@ -262,8 +252,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 顶部让出 iOS 状态栏/刘海（App 全屏下 surface 从 y=0 开始） */
-  padding: calc(6px + env(safe-area-inset-top)) 14px 4px;
+  padding: 6px 14px 4px;
   font-size: var(--title-size, 18px);
   color: var(--text-1, #1a1a1f);
   font-weight: 700;
