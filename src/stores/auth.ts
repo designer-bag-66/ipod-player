@@ -17,8 +17,16 @@ import {
   saveCachedUser,
   clearCachedUser,
   restoreSession,
+  fetchUserPlaylists,
   type NetEaseUser,
 } from '@/services/netease';
+
+/** 登录就绪后后台预取歌单，用户点进「我的歌单」时直接出内容 */
+function prefetchPlaylists(user: NetEaseUser | null): void {
+  const uid = user?.account?.id;
+  if (!uid) return;
+  void fetchUserPlaylists(uid).catch(() => {});
+}
 
 type CodeStatus = 'idle' | 'sending' | 'sent' | 'verifying' | 'error';
 
@@ -66,6 +74,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       const restored = await restoreSession();
       if (restored.user && !get().user) {
         set({ user: restored.user });
+        prefetchPlaylists(restored.user);
       }
     } catch (err) {
       console.warn('[auth] restoreSession failed', err);
@@ -109,12 +118,16 @@ export const useAuth = create<AuthState>((set, get) => ({
       if (user) {
         saveCachedUser(user);
         set({ user });
+        prefetchPlaylists(user);
         return;
       }
 
       // 拉取失败不再清除 cookie（否则用户会被踢出），用缓存维持登录态
       const cached = loadCachedUser();
-      if (cached) set({ user: cached });
+      if (cached) {
+        set({ user: cached });
+        prefetchPlaylists(cached);
+      }
     }
   },
 
@@ -164,6 +177,7 @@ export const useAuth = create<AuthState>((set, get) => ({
         if (user) {
           saveCachedUser(user);
           set({ user, codeStatus: 'sent', loginDebug: '登录成功' });
+          prefetchPlaylists(user);
           console.log('[auth] login via cellphone', user);
         } else {
           set({ codeStatus: 'error', codeError: '登录成功，但获取用户信息失败，请重试' });
