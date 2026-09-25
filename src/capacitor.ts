@@ -15,9 +15,11 @@ export function initCapacitor() {
   // 真正的后台播放需要在 ios/App/App/Info.plist 中添加
   //   UIBackgroundModes: ["audio"]
   // 这里只是配置可见外观
+  // 适配状态栏 / 灵动岛：不覆盖 WebView，内容从状态栏下方开始
+  // （overlay:true 会让 WebView 顶到屏幕最上方，状态栏压在界面上）
   StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
   StatusBar.setBackgroundColor({ color: '#000000' }).catch(() => {});
-  StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
+  StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
 }
 
 // 给 WKWebView 后台音频一个 hint
