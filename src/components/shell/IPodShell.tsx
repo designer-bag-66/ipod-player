@@ -27,8 +27,7 @@ export function IPodShell({ children, wheel, transitioning }: Props) {
 
   const shellStyle = {
     '--screen-w': `${screenW}%`,
-    // screenH = 0 表示自动铺满：不设固定高，交给 flex 撑满
-    ...(screenH > 0 ? { '--screen-h': `${screenH}px` } : {}),
+    '--screen-h': `${screenH}px`,
     '--screen-dy': `${screenDy}px`,
     '--wheel-size': `${wheelSize}%`,
     '--wheel-dy': `${wheelDy}px`,
@@ -36,9 +35,7 @@ export function IPodShell({ children, wheel, transitioning }: Props) {
 
   return (
     <div
-      className={`ipod-shell ${screenH <= 0 ? 'screen-fill' : ''} ${
-        transitioning ? 'popping' : ''
-      }`}
+      className={`ipod-shell safe-top safe-bottom ${transitioning ? 'popping' : ''}`}
       style={shellStyle}
     >
       <div className="w-full flex flex-col items-center flex-1 min-h-0">
@@ -50,8 +47,6 @@ export function IPodShell({ children, wheel, transitioning }: Props) {
           width: 'min(var(--wheel-size, 90%), calc(var(--wheel-max, 46) * 1vh))',
           marginBottom: 'var(--wheel-mb, 0px)',
           transform: 'translateY(var(--wheel-dy, 0px))',
-          // 给底部 home 指示条留出空间，滚轮不被系统手势区遮挡
-          paddingBottom: 'env(safe-area-inset-bottom)',
         }}
       >
         {wheel}
