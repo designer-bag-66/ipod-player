@@ -99,12 +99,28 @@ export function App() {
   }
 
   // 监听系统音量变化（硬件按键 / 系统面板），保持界面显示与实际一致
+  // 正在用滚轮调节音量时不接受系统回写，否则数值会被弹回去（表现为「滚不动」）
+  const adjustingVolRef = useRef(false);
   useEffect(() => {
     let stop: (() => void) | null = null;
-    void watchVolume((v) => usePlayer.getState().setVolume(v)).then((fn) => {
+    void watchVolume((v) => {
+      if (adjustingVolRef.current) return;
+      usePlayer.getState().setVolume(v);
+    }).then((fn) => {
       stop = fn;
     });
     return () => stop?.();
+  }, []);
+
+  // iOS 首次必须由用户手势触发一次播放，之后才能自动续播
+  useEffect(() => {
+    const unlock = () => usePlayer.getState().unlock();
+    window.addEventListener('pointerdown', unlock, { once: true, capture: true });
+    window.addEventListener('touchstart', unlock, { once: true, capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock, { capture: true });
+      window.removeEventListener('touchstart', unlock, { capture: true });
+    };
   }, []);
 
   // 卸载时清理 timer
@@ -383,7 +399,15 @@ export function App() {
               if (quick.adjusting === 'bright') {
                 applyBrightness(brightness + d * 0.05);
               } else if (quick.adjusting === 'vol') {
-                void setVolumeLevel(volume + d * 0.05);
+                const nv = Math.min(1, Math.max(0, volume + d * 0.05));
+                // 先本地立刻更新，保证和调亮度一样跟手
+                usePlayer.getState().setVolume(nv);
+                adjustingVolRef.current = true;
+                void setVolumeLevel(nv).finally(() => {
+                  window.setTimeout(() => {
+                    adjustingVolRef.current = false;
+                  }, 600);
+                });
               } else {
                 setQuick((q) => ({
                   ...q,
