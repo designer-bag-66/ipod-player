@@ -33,6 +33,8 @@ const OUTER_PAD_RATIO = 1.15; // 略大于圆盘：贴边/出界一点也能响�
 const TAP_ANGLE_HALF = Math.PI / 6; // 每个按键占 60° 扇形
 // 底部播放键容易碰到 home 指示条 / 贴边区域，扇区放宽到 ±96°
 const PLAY_ANGLE_HALF = Math.PI / 6 * 1.6;
+/** 四分带宽度：上/下/左/右各占这么大比例的区域即对应按键 */
+const BAND = 0.3;
 const SWIPE_ANGLE_THRESHOLD = 0.35; // 约 20° 视为滑动，提高切歌按键命中率
 const LONG_PRESS_MS = 600;
 const LONG_PRESS_MOVE_PX = 14;
@@ -97,11 +99,19 @@ export function ClickWheel({
       if (disabled) return;
       // 首次手势里解锁 WebAudio，之后才听得到选择音效
       unlockSound();
+      const rect = el!.getBoundingClientRect();
       const { cx, cy, radius } = getCenter();
       const dx = e.clientX - cx;
       const dy = e.clientY - cy;
       const dist = Math.hypot(dx, dy);
-      const innerRadius = radius * CENTER_RATIO;
+      // 中心区按长宽各自比例判定（布局调整后圆盘可能是椭圆）
+      const innerX = (rect.width / 2) * CENTER_RATIO;
+      const innerY = (rect.height / 2) * CENTER_RATIO;
+      const inCenter = Math.abs(dx) < innerX && Math.abs(dy) < innerY;
+      // 感应范围同样按椭圆放宽，贴边/出界一点也能响应
+      const inWheel =
+        Math.abs(dx) < (rect.width / 2) * OUTER_PAD_RATIO &&
+        Math.abs(dy) < (rect.height / 2) * OUTER_PAD_RATIO;
 
       movedRef.current = false;
       startAngleRef.current = null;
@@ -112,7 +122,7 @@ export function ClickWheel({
       clearLongPress();
 
       // 中央确认键
-      if (dist < innerRadius) {
+      if (inCenter) {
         startTargetRef.current = 'center';
         setPressed('center');
         // 长按进入播放界面
@@ -129,7 +139,7 @@ export function ClickWheel({
       }
 
       // 红色圆环区（整个圆盘）
-      if (dist < radius * OUTER_PAD_RATIO) {
+      if (inWheel) {
         touchingRef.current = true;
         const angle = angleFromCenter(e.clientX, e.clientY, cx, cy);
         prevAngleRef.current = angle;
@@ -199,12 +209,18 @@ export function ClickWheel({
             playTick('select');
           }
         } else if (startTargetRef.current === 'ring') {
-          // 用按下时的角度判断按键，避免抬起时手指滑出扇形区导致失效
-          const angle = startAngleRef.current ?? (() => {
-            const { cx, cy } = getCenter();
-            return angleFromCenter(e.clientX, e.clientY, cx, cy);
-          })();
-          const btn = buttonAtAngle(angle);
+          // 用「按下时的位置落在哪一带」判断按键：
+          // 布局调整后圆盘可能是椭圆/被裁剪，纯角度判定会和视觉对不上，
+          // 这里直接用矩形四分带，点哪一带就是哪个键，跟外形无关。
+          const rect = el!.getBoundingClientRect();
+          const p = startPosRef.current ?? { x: e.clientX, y: e.clientY };
+          const nx = (p.x - rect.left) / rect.width;
+          const ny = (p.y - rect.top) / rect.height;
+          let btn: 'menu' | 'prev' | 'next' | 'play' | null = null;
+          if (ny < BAND) btn = 'menu';
+          else if (ny > 1 - BAND) btn = 'play';
+          else if (nx < BAND) btn = 'prev';
+          else if (nx > 1 - BAND) btn = 'next';
           if (btn) {
             setPressed(btn);
             switch (btn) {
