@@ -19,6 +19,7 @@ import {
   setVolumeLevel,
   watchVolume,
 } from '@/services/system';
+import { hydrateNeteaseCache } from '@/services/netease';
 import { App as CapacitorApp } from '@capacitor/app';
 import { NavTransition, type NavAnimState } from '@/components/shell/NavTransition';
 import { HomeView } from '@/components/views/HomeView';
@@ -84,6 +85,8 @@ export function App() {
   useEffect(() => {
     usePrefs.getState().init(); // 先恢复首选项（API 地址等）
     playerInit();
+    // 先把上次的歌单缓存读回内存，进入歌单页即可秒开
+    void hydrateNeteaseCache();
     // 预览模式下示例登录态已注入，跳过联网 bootstrap，避免被覆盖
     if (!PREVIEW.active) useAuth.getState().bootstrap();
     // 启动即用系统值同步亮度 / 音量（Web 端读本地设置）
