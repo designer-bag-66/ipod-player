@@ -29,8 +29,10 @@ interface Props {
 
 const STEP_DEG = 20; // 文档 4.3：18~22° 推荐 20°
 const CENTER_RATIO = 0.42;
-const OUTER_PAD_RATIO = 1; // 整个圆盘区域都响应（修复边缘播放/暂停键失效）
+const OUTER_PAD_RATIO = 1.15; // 略大于圆盘：贴边/出界一点也能响应
 const TAP_ANGLE_HALF = Math.PI / 6; // 每个按键占 60° 扇形
+// 底部播放键容易碰到 home 指示条 / 贴边区域，扇区放宽到 ±96°
+const PLAY_ANGLE_HALF = Math.PI / 6 * 1.6;
 const SWIPE_ANGLE_THRESHOLD = 0.35; // 约 20° 视为滑动，提高切歌按键命中率
 const LONG_PRESS_MS = 600;
 const LONG_PRESS_MOVE_PX = 14;
@@ -38,10 +40,10 @@ const LONG_PRESS_MOVE_PX = 14;
 /** 根据角度判断落在四向按键的哪个象限（0 点在 12 点钟方向，顺时针为正） */
 function buttonAtAngle(angle: number): 'menu' | 'prev' | 'next' | 'play' | null {
   const a = normalizeAngle(angle);
+  if (Math.abs(Math.abs(a) - Math.PI) <= PLAY_ANGLE_HALF) return 'play';
   if (Math.abs(a) <= TAP_ANGLE_HALF) return 'menu';
   if (Math.abs(a - Math.PI / 2) <= TAP_ANGLE_HALF) return 'next';
   if (Math.abs(a + Math.PI / 2) <= TAP_ANGLE_HALF) return 'prev';
-  if (Math.abs(Math.abs(a) - Math.PI) <= TAP_ANGLE_HALF) return 'play';
   return null;
 }
 
